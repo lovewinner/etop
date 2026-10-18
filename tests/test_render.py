@@ -35,11 +35,19 @@ class MeterTests(unittest.TestCase):
 class ColourBandTests(unittest.TestCase):
     def test_thresholds(self):
         self.assertEqual(load_band(0), "good")
-        self.assertEqual(load_band(59.9), "good")
-        self.assertEqual(load_band(60), "warn")
-        self.assertEqual(load_band(84.9), "warn")
+        self.assertEqual(load_band(39.9), "good")
+        self.assertEqual(load_band(40), "warn")
+        self.assertEqual(load_band(59.9), "warn")
+        self.assertEqual(load_band(60), "orange")
+        self.assertEqual(load_band(84.9), "orange")
         self.assertEqual(load_band(85), "bad")
         self.assertEqual(load_band(100), "bad")
+
+    def test_all_four_bands_are_reachable(self):
+        self.assertEqual(
+            {load_band(0), load_band(50), load_band(70), load_band(90)},
+            {"good", "warn", "orange", "bad"},
+        )
 
 
 class GraphTests(unittest.TestCase):

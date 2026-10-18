@@ -36,7 +36,12 @@ from .render import (
     meter_parts,
 )
 
-_ANSI_COLORS = {"good": "\033[32m", "warn": "\033[33m", "bad": "\033[31m"}
+_ANSI_COLORS = {
+    "good": "\033[32m",
+    "warn": "\033[33m",
+    "orange": "\033[38;5;173m",
+    "bad": "\033[31m",
+}
 _ANSI_RESET = "\033[0m"
 
 

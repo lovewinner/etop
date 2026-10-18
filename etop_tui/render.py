@@ -24,10 +24,12 @@ def _clamp(value: float) -> float:
 
 
 def load_band(pct: float) -> str:
-    """Map a utilisation percentage to a colour band."""
+    """Map a utilisation percentage to one of four colour bands."""
     if pct >= 85:
         return "bad"
     if pct >= 60:
+        return "orange"
+    if pct >= 40:
         return "warn"
     return "good"
 
@@ -92,10 +94,12 @@ class Palette:
         backgrounds.append(curses.COLOR_BLACK)
         if curses.COLORS >= 256:
             # Muted xterm-256 shades; pure 46/226/196 are harsh on the eyes.
-            good, warn, bad = 71, 179, 167
+            good, warn, orange, bad = 71, 179, 173, 167
         else:
-            good, warn, bad = (
+            # 8-colour terminals collapse the middle two bands.
+            good, warn, orange, bad = (
                 curses.COLOR_GREEN,
+                curses.COLOR_YELLOW,
                 curses.COLOR_YELLOW,
                 curses.COLOR_RED,
             )
@@ -105,6 +109,7 @@ class Palette:
             "title": curses.COLOR_CYAN,
             "good": good,
             "warn": warn,
+            "orange": orange,
             "bad": bad,
             "accent": curses.COLOR_MAGENTA,
         }
@@ -134,9 +139,11 @@ class Palette:
     def level_attr(self, pct: float) -> int:
         band = load_band(pct)
         if not self.color or band not in self._pairs:
-            # Monochrome fallback so the bands remain distinguishable.
+            # Monochrome fallback so the four bands remain distinguishable.
             if band == "bad":
                 return curses.A_BOLD | curses.A_REVERSE
+            if band == "orange":
+                return curses.A_BOLD | curses.A_UNDERLINE
             if band == "warn":
                 return curses.A_BOLD
             return curses.A_NORMAL
