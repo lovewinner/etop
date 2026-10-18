@@ -143,8 +143,8 @@ class Palette:
             base = curses.A_BOLD
         if bold:
             base |= curses.A_BOLD
-        if name == "dim":
-            base |= curses.A_DIM
+        # Deliberately no A_DIM: some terminals render faint text with a
+        # tinted background, which breaks a transparent terminal background.
         return base
 
     def level_attr(self, pct: float) -> int:
