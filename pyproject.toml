@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "etop"
+version = "0.1.0"
+description = "A small htop-like terminal monitor for CPU, memory, GPU and VRAM"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "etop contributors" }]
+keywords = ["tui", "monitor", "htop", "cpu", "memory", "gpu"]
+classifiers = [
+    "Environment :: Console :: Curses",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Monitoring",
+]
+
+[project.scripts]
+etop = "etop_tui.app:main"
+
+[tool.setuptools]
+packages = ["etop_tui"]

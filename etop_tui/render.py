@@ -1,0 +1,687 @@
+"""Curses drawing helpers and the four metric panels."""
+
+from __future__ import annotations
+
+import curses
+import time
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+
+from . import __version__
+from .collect import CpuSample, MemSample
+from .gpu import GpuSample
+
+GIB = 1024 ** 3
+MIB = 1024 ** 2
+
+_PARTIAL = " ▏▎▍▌▋▊▉█"
+# Braille dot bits indexed by [column_in_cell][row_in_cell].
+_DOTS = ((0x01, 0x02, 0x04, 0x40), (0x08, 0x10, 0x20, 0x80))
+
+
+def _clamp(value: float) -> float:
+    return max(0.0, min(100.0, float(value)))
+
+
+def format_bytes(value: Optional[int]) -> str:
+    if value is None:
+        return "n/a"
+    value = max(0, int(value))
+    if value >= GIB:
+        return f"{value / GIB:.1f} GiB"
+    if value >= MIB:
+        return f"{value / MIB:.0f} MiB"
+    if value >= 1024:
+        return f"{value / 1024:.0f} KiB"
+    return f"{value} B"
+
+
+def format_uptime(seconds: float) -> str:
+    total = int(seconds)
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    return f"{minutes}m"
+
+
+class Palette:
+    """Colour pairs with a graceful monochrome fallback."""
+
+    def __init__(self, enabled: bool = True) -> None:
+        self.color = bool(enabled and curses.has_colors())
+        self._pairs: Dict[str, int] = {}
+        if not self.color:
+            return
+        try:
+            curses.start_color()
+        except curses.error:
+            self.color = False
+            return
+        try:
+            curses.use_default_colors()
+            background = -1
+        except curses.error:
+            background = curses.COLOR_BLACK
+        colours = {
+            "normal": curses.COLOR_WHITE,
+            "label": curses.COLOR_CYAN,
+            "title": curses.COLOR_CYAN,
+            "good": curses.COLOR_GREEN,
+            "warn": curses.COLOR_YELLOW,
+            "bad": curses.COLOR_RED,
+            "accent": curses.COLOR_MAGENTA,
+        }
+        for index, (name, foreground) in enumerate(colours.items(), start=1):
+            try:
+                curses.init_pair(index, foreground, background)
+            except curses.error:
+                continue
+            self._pairs[name] = index
+
+    def attr(self, name: str = "normal", bold: bool = False) -> int:
+        base = 0
+        if self.color and name in self._pairs:
+            base = curses.color_pair(self._pairs[name])
+        elif name in ("label", "title", "accent"):
+            base = curses.A_BOLD
+        if bold:
+            base |= curses.A_BOLD
+        if name == "dim":
+            base |= curses.A_DIM
+        return base
+
+    def level_attr(self, pct: float) -> int:
+        if pct >= 85:
+            return self.attr("bad", bold=True)
+        if pct >= 60:
+            return self.attr("warn", bold=True)
+        return self.attr("good", bold=True)
+
+
+def put(win, y: int, x: int, text: str, attr: int = 0) -> None:
+    """Clip and draw, swallowing curses edge/encoding errors."""
+    if not text:
+        return
+    try:
+        height, width = win.getmaxyx()
+    except curses.error:
+        return
+    if y < 0 or y >= height or x >= width:
+        return
+    if x < 0:
+        text = text[-x:]
+        x = 0
+    text = text[: max(0, width - x)]
+    if not text:
+        return
+    try:
+        win.addstr(y, x, text, attr)
+    except curses.error:
+        pass
+
+
+@dataclass(frozen=True)
+class Rect:
+    y: int
+    x: int
+    h: int
+    w: int
+
+    def inner(self) -> "Rect":
+        return Rect(self.y + 1, self.x + 1, max(0, self.h - 2), max(0, self.w - 2))
+
+
+@dataclass
+class Layout:
+    header: Rect
+    panels: Dict[str, Rect]
+    footer: Rect
+
+
+def compute_layout(
+    rows: int, cols: int, gpu_count: int, has_vram: bool
+) -> Optional[Layout]:
+    """Divide the screen between the panels, or None if it is too small."""
+    if rows < 10 or cols < 44:
+        return None
+
+    heights = {"cpu": 4, "mem": 5}
+    if gpu_count:
+        heights["gpu"] = 4
+    if has_vram:
+        heights["vram"] = 4
+
+    available = rows - 2  # header + footer
+    minimum = {"cpu": 3, "mem": 4, "gpu": 4, "vram": 3}
+    while sum(heights.values()) > available:
+        shrinkable = [key for key in heights if heights[key] > minimum[key]]
+        if not shrinkable:
+            return None
+        key = max(shrinkable, key=lambda name: heights[name])
+        heights[key] -= 1
+
+    caps = {
+        "cpu": 2 + 20 + 1,
+        "mem": 2 + 20 + 3,
+        "gpu": 2 + 14 + 2,
+        "vram": 2 + 12 + 2,
+    }
+    while sum(heights.values()) < available:
+        grew = False
+        for key in ("cpu", "mem", "gpu", "vram"):
+            if key in heights and heights[key] < caps[key] and sum(heights.values()) < available:
+                heights[key] += 1
+                grew = True
+        if not grew:
+            break
+
+    panels: Dict[str, Rect] = {}
+    y = 1
+    for key in ("cpu", "mem", "gpu", "vram"):
+        if key in heights:
+            panels[key] = Rect(y, 0, heights[key], cols)
+            y += heights[key]
+    return Layout(Rect(0, 0, 1, cols), panels, Rect(rows - 1, 0, 1, cols))
+
+
+def draw_panel(
+    win,
+    rect: Rect,
+    title: str,
+    right: str = "",
+    pal: Optional[Palette] = None,
+    ascii_mode: bool = False,
+    right_attr: Optional[int] = None,
+) -> None:
+    if rect.h < 2 or rect.w < 4:
+        return
+    pal = pal or Palette(False)
+    if ascii_mode:
+        tl = tr = bl = br = "+"
+        horizontal, vertical = "-", "|"
+    else:
+        tl, tr, bl, br = "┌", "┐", "└", "┘"
+        horizontal, vertical = "─", "│"
+
+    inner = rect.w - 2
+    title_text = f" {title} "
+    right_text = f" {right} " if right else ""
+    if len(title_text) + len(right_text) > inner:
+        right_text = ""
+    if len(title_text) > inner:
+        title_text = title_text[:inner]
+    fill = max(0, inner - len(title_text) - len(right_text))
+    top = tl + title_text + horizontal * fill + right_text + tr
+    put(win, rect.y, rect.x, top, pal.attr("dim"))
+    put(win, rect.y, rect.x + 1, title_text, pal.attr("title", bold=True))
+    if right_text:
+        put(
+            win,
+            rect.y,
+            rect.x + 1 + len(title_text) + fill,
+            right_text,
+            right_attr if right_attr is not None else pal.attr("title", bold=True),
+        )
+    for offset in range(1, rect.h - 1):
+        put(win, rect.y + offset, rect.x, vertical, pal.attr("dim"))
+        put(win, rect.y + offset, rect.x + rect.w - 1, vertical, pal.attr("dim"))
+    put(
+        win,
+        rect.y + rect.h - 1,
+        rect.x,
+        bl + horizontal * (rect.w - 2) + br,
+        pal.attr("dim"),
+    )
+
+
+def meter_parts(pct: float, width: int, ascii_mode: bool = False) -> Tuple[str, str]:
+    """Return (filled, empty) strings for a horizontal meter."""
+    if width <= 0:
+        return "", ""
+    pct = _clamp(pct)
+    if ascii_mode:
+        filled_count = int(round(pct / 100.0 * width))
+        return "#" * filled_count, " " * (width - filled_count)
+    units = int(round(pct / 100.0 * width * 8))
+    full, remainder = divmod(units, 8)
+    full = min(full, width)
+    if full >= width:
+        return "█" * width, ""
+    filled = "█" * full
+    if remainder:
+        filled += _PARTIAL[remainder]
+    return filled, " " * (width - len(filled))
+
+
+def draw_meter(
+    win,
+    y: int,
+    x: int,
+    width: int,
+    pct: Optional[float],
+    pal: Palette,
+    ascii_mode: bool = False,
+    suffix: Optional[str] = None,
+) -> None:
+    if width <= 0:
+        return
+    if suffix is None:
+        suffix = " n/a" if pct is None else f" {pct:5.1f}%"
+    bar_width = max(1, width - len(suffix))
+    if pct is None:
+        put(win, y, x, " " * bar_width, pal.attr("dim"))
+        put(win, y, x + bar_width, suffix, pal.attr("dim"))
+        return
+    pct = _clamp(pct)
+    filled, empty = meter_parts(pct, bar_width, ascii_mode)
+    attr = pal.level_attr(pct)
+    put(win, y, x, filled, attr)
+    put(win, y, x + len(filled), empty, pal.attr("dim"))
+    put(win, y, x + bar_width, suffix, attr)
+
+
+def graph_lines(
+    values: Iterable[float],
+    width: int,
+    height: int,
+    vmax: float = 100.0,
+    ascii_mode: bool = False,
+) -> List[str]:
+    """Render a filled history graph, newest sample on the right."""
+    if width <= 0 or height <= 0:
+        return []
+    data = list(values)[-width * 2 :]
+    padded: List[Optional[float]] = [None] * (width * 2 - len(data)) + data
+    if ascii_mode:
+        canvas = [[" "] * width for _ in range(height)]
+        for column in range(width):
+            pair = [
+                value
+                for value in padded[column * 2 : column * 2 + 2]
+                if value is not None
+            ]
+            if not pair:
+                continue
+            ratio = max(0.0, min(1.0, (sum(pair) / len(pair)) / vmax))
+            filled_rows = int(round(ratio * height))
+            if ratio > 0:
+                filled_rows = max(1, filled_rows)
+            for row in range(height - filled_rows, height):
+                canvas[row][column] = "#"
+        return ["".join(row) for row in canvas]
+
+    lines: List[str] = []
+    dot_height = height * 4
+    for row in range(height):
+        chars: List[str] = []
+        for column in range(width):
+            bits = 0
+            for sub_column in (0, 1):
+                value = padded[column * 2 + sub_column]
+                if value is None:
+                    continue
+                ratio = max(0.0, min(1.0, value / vmax))
+                level = int(round(ratio * dot_height))
+                if ratio > 0:
+                    level = max(1, level)
+                for sub_row in range(4):
+                    from_bottom = (height - row - 1) * 4 + (3 - sub_row)
+                    if from_bottom < level:
+                        bits |= _DOTS[sub_column][sub_row]
+            chars.append(chr(0x2800 + bits) if bits else " ")
+        lines.append("".join(chars))
+    return lines
+
+
+def draw_graph(
+    win,
+    rect: Rect,
+    values: Iterable[float],
+    pal: Palette,
+    ascii_mode: bool = False,
+    vmax: float = 100.0,
+) -> None:
+    if rect.h <= 0 or rect.w <= 0:
+        return
+    recent = [value for value in values if value is not None]
+    attr = pal.level_attr(recent[-1] if recent else 0.0)
+    for offset, line in enumerate(
+        graph_lines(values, rect.w, rect.h, vmax, ascii_mode)
+    ):
+        put(win, rect.y + offset, rect.x, line, attr)
+
+
+def draw_cpu(
+    win,
+    rect: Rect,
+    sample: CpuSample,
+    history: Sequence[float],
+    pal: Palette,
+    ascii_mode: bool,
+) -> None:
+    draw_panel(
+        win,
+        rect,
+        "CPU",
+        f"{sample.total:5.1f}%",
+        pal,
+        ascii_mode,
+        right_attr=pal.level_attr(sample.total),
+    )
+    inner = rect.inner()
+    if inner.h <= 0 or inner.w <= 0:
+        return
+    info_rows = 1 if inner.h >= 1 else 0
+    graph_h = max(0, inner.h - info_rows)
+    if graph_h:
+        draw_graph(
+            win,
+            Rect(inner.y, inner.x, graph_h, inner.w),
+            history,
+            pal,
+            ascii_mode,
+        )
+    if info_rows:
+        draw_meter(
+            win,
+            inner.y + graph_h,
+            inner.x,
+            inner.w,
+            sample.total,
+            pal,
+            ascii_mode,
+        )
+
+
+def draw_mem(
+    win,
+    rect: Rect,
+    mem: MemSample,
+    history: Sequence[float],
+    pal: Palette,
+    ascii_mode: bool,
+) -> None:
+    draw_panel(
+        win,
+        rect,
+        "MEMORY",
+        f"{mem.used_pct:5.1f}%",
+        pal,
+        ascii_mode,
+        right_attr=pal.level_attr(mem.used_pct),
+    )
+    inner = rect.inner()
+    if inner.h <= 0 or inner.w <= 0:
+        return
+    if inner.h >= 5:
+        info_rows = 3
+    elif inner.h >= 3:
+        info_rows = 2
+    elif inner.h >= 1:
+        info_rows = 1
+    else:
+        info_rows = 0
+    graph_h = max(0, inner.h - info_rows)
+    if graph_h:
+        draw_graph(
+            win,
+            Rect(inner.y, inner.x, graph_h, inner.w),
+            history,
+            pal,
+            ascii_mode,
+        )
+    y = inner.y + graph_h
+    if info_rows >= 1:
+        draw_meter(win, y, inner.x, inner.w, mem.used_pct, pal, ascii_mode)
+    if info_rows >= 2:
+        detail = (
+            f"Used {format_bytes(mem.used)} / {format_bytes(mem.total)}"
+            f"   Cache {format_bytes(mem.cache_total)}"
+            f"   Avail {format_bytes(mem.available)}"
+        )
+        put(win, y + 1, inner.x, detail, pal.attr("dim"))
+    if info_rows >= 3:
+        if mem.swap_total:
+            swap = (
+                f"Swap {format_bytes(mem.swap_used)} / "
+                f"{format_bytes(mem.swap_total)} ({mem.swap_pct:.1f}%)"
+            )
+        else:
+            swap = "Swap disabled"
+        put(win, y + 2, inner.x, swap, pal.attr("dim"))
+
+
+def _temp_text(temp: Optional[float], ascii_mode: bool) -> str:
+    if temp is None:
+        return ""
+    unit = "C" if ascii_mode else "°C"
+    return f"{temp:.0f}{unit}"
+
+
+def draw_gpu(
+    win,
+    rect: Rect,
+    gpus: Sequence[GpuSample],
+    histories: Mapping[str, Sequence[float]],
+    pal: Palette,
+    ascii_mode: bool,
+) -> None:
+    if not gpus:
+        return
+    primary = gpus[0]
+    util = primary.util
+    right = f"{util:5.1f}%" if util is not None else "  n/a"
+    draw_panel(
+        win,
+        rect,
+        "GPU",
+        right,
+        pal,
+        ascii_mode,
+        right_attr=pal.level_attr(util if util is not None else 0.0),
+    )
+    inner = rect.inner()
+    if inner.h <= 0 or inner.w <= 0:
+        return
+
+    if len(gpus) > 1:
+        for row, gpu in enumerate(gpus[: inner.h]):
+            value = gpu.util
+            suffix = f" {value:5.1f}%" if value is not None else "   n/a"
+            draw_meter(
+                win,
+                inner.y + row,
+                inner.x + 2,
+                inner.w - 2,
+                value,
+                pal,
+                ascii_mode,
+                suffix=suffix,
+            )
+            put(win, inner.y + row, inner.x, f"{gpu.index}", pal.attr("dim"))
+        return
+
+    info_rows = 2 if inner.h >= 3 else 1 if inner.h >= 1 else 0
+    graph_h = max(0, inner.h - info_rows)
+    if graph_h:
+        draw_graph(
+            win,
+            Rect(inner.y, inner.x, graph_h, inner.w),
+            histories.get(f"gpu:{primary.index}", ()),
+            pal,
+            ascii_mode,
+        )
+    y = inner.y + graph_h
+    if info_rows >= 1:
+        suffix = f" {util:5.1f}%" if util is not None else "   n/a"
+        temperature = _temp_text(primary.temp, ascii_mode)
+        if temperature:
+            suffix += "   " + temperature
+        draw_meter(win, y, inner.x, inner.w, util, pal, ascii_mode, suffix=suffix)
+    if info_rows >= 2:
+        name = primary.name
+        if primary.stale:
+            name += "  [stale]"
+        put(win, y + 1, inner.x, name, pal.attr("dim"))
+
+
+def draw_vram(
+    win,
+    rect: Rect,
+    gpus: Sequence[GpuSample],
+    histories: Mapping[str, Sequence[float]],
+    pal: Palette,
+    ascii_mode: bool,
+) -> None:
+    with_memory = [gpu for gpu in gpus if gpu.mem_total]
+    if not with_memory:
+        return
+    primary = with_memory[0]
+    pct = primary.mem_pct
+    right = f"{pct:5.1f}%" if pct is not None else "  n/a"
+    draw_panel(
+        win,
+        rect,
+        "VRAM",
+        right,
+        pal,
+        ascii_mode,
+        right_attr=pal.level_attr(pct if pct is not None else 0.0),
+    )
+    inner = rect.inner()
+    if inner.h <= 0 or inner.w <= 0:
+        return
+
+    if len(with_memory) > 1:
+        for row, gpu in enumerate(with_memory[: inner.h]):
+            value = gpu.mem_pct
+            used = format_bytes(gpu.mem_used)
+            total = format_bytes(gpu.mem_total)
+            suffix = f" {value:5.1f}%" if value is not None else "   n/a"
+            suffix += f"  {used}/{total}"
+            draw_meter(
+                win,
+                inner.y + row,
+                inner.x + 2,
+                inner.w - 2,
+                value,
+                pal,
+                ascii_mode,
+                suffix=suffix,
+            )
+            put(win, inner.y + row, inner.x, f"{gpu.index}", pal.attr("dim"))
+        return
+
+    info_rows = 2 if inner.h >= 4 else 1 if inner.h >= 1 else 0
+    graph_h = max(0, inner.h - info_rows)
+    if graph_h:
+        draw_graph(
+            win,
+            Rect(inner.y, inner.x, graph_h, inner.w),
+            histories.get(f"vram:{primary.index}", ()),
+            pal,
+            ascii_mode,
+        )
+    y = inner.y + graph_h
+    if info_rows >= 1:
+        draw_meter(win, y, inner.x, inner.w, pct, pal, ascii_mode)
+    if info_rows >= 2:
+        detail = (
+            f"{format_bytes(primary.mem_used)} / "
+            f"{format_bytes(primary.mem_total)} used"
+        )
+        put(win, y + 1, inner.x, detail, pal.attr("dim"))
+
+
+def draw_header(
+    win,
+    rect: Rect,
+    hostname: str,
+    uptime: float,
+    loads: Sequence[float],
+    interval: float,
+    paused: bool,
+    pal: Palette,
+) -> None:
+    left = f" etop {__version__}  {hostname}"
+    right = " " + time.strftime("%H:%M:%S") + " "
+    parts = [
+        f"up {format_uptime(uptime)}",
+        f"load {loads[0]:.2f} {loads[1]:.2f} {loads[2]:.2f}",
+    ]
+    if paused:
+        parts.append("PAUSED")
+    space = rect.w - len(left) - len(right) - 1
+    middle_parts = []
+    used = 0
+    for part in parts:
+        addition = len(part) + (2 if middle_parts else 0)
+        if used + addition > space:
+            break
+        middle_parts.append(part)
+        used += addition
+    put(win, rect.y, 0, left, pal.attr("title", bold=True))
+    if middle_parts:
+        put(
+            win,
+            rect.y,
+            len(left) + 1,
+            "  ".join(middle_parts),
+            pal.attr("dim"),
+        )
+    if rect.w >= len(right):
+        put(win, rect.y, rect.w - len(right), right, pal.attr("dim"))
+
+
+def draw_footer(
+    win, rect: Rect, interval: float, paused: bool, pal: Palette
+) -> None:
+    text = (
+        f" q quit   p pause   +/- interval   r reset   h help"
+        f"     {interval:.2f}s"
+    )
+    if paused:
+        text += "   PAUSED"
+    put(win, rect.y, 1, text, pal.attr("dim"))
+
+
+def draw_help(win, interval: float, pal: Palette, ascii_mode: bool) -> None:
+    height, width = win.getmaxyx()
+    box_width = min(58, max(30, width - 6))
+    box_height = 10
+    y = max(0, (height - box_height) // 2)
+    x = max(0, (width - box_width) // 2)
+    blank = " " * box_width
+    for offset in range(box_height):
+        put(win, y + offset, x, blank, pal.attr("normal"))
+    draw_panel(
+        win,
+        Rect(y, x, box_height, box_width),
+        "HELP",
+        "any key",
+        pal,
+        ascii_mode,
+    )
+    lines = [
+        " q, Esc      quit",
+        " p, Space    pause / resume",
+        " + / -       faster / slower refresh",
+        " r           reset history graphs",
+        " h, ?        close this help",
+        "",
+        f" refresh interval: {interval:.2f}s",
+    ]
+    for offset, line in enumerate(lines[: box_height - 2]):
+        put(win, y + 1 + offset, x + 2, line, pal.attr("normal"))
+
+
+def draw_too_small(
+    win, rows: int, cols: int, pal: Palette, min_rows: int = 10
+) -> None:
+    put(win, 0, 1, "etop", pal.attr("title", bold=True))
+    message = f"terminal too small ({cols}x{rows}, need at least 44x{min_rows})"
+    put(win, 1, 1, message, pal.attr("normal"))
