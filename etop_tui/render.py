@@ -75,23 +75,36 @@ def format_uptime(seconds: float) -> str:
 class Palette:
     """Colour pairs with a graceful monochrome fallback."""
 
-    def __init__(self, enabled: bool = True) -> None:
-        self.color = bool(enabled and curses.has_colors())
-        self._pairs: Dict[str, int] = {}
-        if not self.color:
-            return
+    @staticmethod
+    def _init_default_background() -> bool:
+        """Make colour pair 0 use the terminal's default background."""
         try:
             curses.start_color()
         except curses.error:
-            self.color = False
-            return
-        backgrounds = []
+            return False
         try:
             curses.use_default_colors()
-            backgrounds.append(-1)
         except curses.error:
             pass
-        backgrounds.append(curses.COLOR_BLACK)
+        assume = getattr(curses, "assume_default_colors", None)
+        if assume is not None:
+            try:
+                assume(-1, -1)
+            except curses.error:
+                pass
+        return True
+
+    def __init__(self, enabled: bool = True) -> None:
+        self.color = bool(enabled and curses.has_colors())
+        self._pairs: Dict[str, int] = {}
+        # Even in monochrome mode, make pair 0 use the terminal's default
+        # background instead of ncurses' hard-coded black.
+        if not self._init_default_background():
+            self.color = False
+            return
+        if not self.color:
+            return
+        backgrounds = [-1, curses.COLOR_BLACK]
         if curses.COLORS >= 256:
             # Muted xterm-256 shades; pure 46/226/196 are harsh on the eyes.
             good, warn, orange, bad = 71, 179, 173, 167
