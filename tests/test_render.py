@@ -10,7 +10,6 @@ from etop_tui.render import (
     compact_layout,
     compact_metrics,
     compact_metrics_for_height,
-    compute_layout,
     format_bytes,
     format_uptime,
     load_band,
@@ -70,77 +69,7 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(format_uptime(90000), "1d 1h")
 
 
-class LayoutTests(unittest.TestCase):
-    def _check(self, layout, rows, cols):
-        rects = [layout.header] + list(layout.panels.values()) + [layout.footer]
-        for rect in rects:
-            self.assertGreaterEqual(rect.y, 0)
-            self.assertGreaterEqual(rect.x, 0)
-            self.assertLessEqual(rect.y + rect.h, rows)
-            self.assertLessEqual(rect.x + rect.w, cols)
-        filled = [set(range(rect.y, rect.y + rect.h)) for rect in rects]
-        for i in range(len(filled)):
-            for j in range(i + 1, len(filled)):
-                self.assertFalse(filled[i] & filled[j])
-
-    def test_fits_common_sizes(self):
-        for rows, cols in ((24, 80), (30, 120), (40, 110), (16, 60)):
-            layout = compute_layout(rows, cols, 1, True)
-            if layout is None:
-                continue
-            self._check(layout, rows, cols)
-            self.assertIn("cpu", layout.panels)
-            self.assertIn("mem", layout.panels)
-            self.assertIn("gpu", layout.panels)
-            self.assertIn("vram", layout.panels)
-
-    def test_full_layout_shrinks_details_before_compact(self):
-        self.assertIsNone(compute_layout(14, 80, 1, True))
-        layout = compute_layout(15, 80, 1, True)
-        self.assertIsNotNone(layout)
-        self._check(layout, 15, 80)
-        self.assertEqual(
-            {key: rect.h for key, rect in layout.panels.items()},
-            {"cpu": 3, "mem": 4, "gpu": 3, "vram": 3},
-        )
-        layout = compute_layout(16, 80, 1, True)
-        self.assertEqual(layout.panels["mem"].h, 5)
-        self.assertEqual(layout.panels["vram"].h, 3)
-        layout = compute_layout(17, 80, 1, True)
-        self.assertEqual(layout.panels["vram"].h, 4)
-
-    def test_no_gpu(self):
-        layout = compute_layout(24, 80, 0, False)
-        self.assertIsNotNone(layout)
-        self._check(layout, 24, 80)
-        self.assertNotIn("gpu", layout.panels)
-        self.assertNotIn("vram", layout.panels)
-
-    def test_multi_gpu_text_layout(self):
-        layout = compute_layout(24, 80, 4, True)
-        self.assertIsNotNone(layout)
-        self._check(layout, 24, 80)
-        self.assertIn("gpu", layout.panels)
-        self.assertNotIn("vram", layout.panels)
-        self.assertEqual(layout.panels["gpu"].h, 6)
-
-        layout = compute_layout(16, 44, 4, True)
-        self.assertIsNotNone(layout)
-        self._check(layout, 16, 44)
-        self.assertEqual(layout.panels["gpu"].h, 6)
-
-        layout = compute_layout(24, 80, 12, True)
-        self.assertIsNotNone(layout)
-        self._check(layout, 24, 80)
-        self.assertEqual(layout.panels["gpu"].h, 14)
-
-        self.assertIsNone(compute_layout(24, 80, 16, True))
-
-    def test_too_small(self):
-        self.assertIsNone(compute_layout(9, 80, 0, False))
-        self.assertIsNone(compute_layout(24, 40, 0, False))
-        self.assertIsNone(compute_layout(12, 50, 1, True))
-
+class RectTests(unittest.TestCase):
     def test_rect_inner(self):
         inner = Rect(1, 2, 5, 10).inner()
         self.assertEqual((inner.y, inner.x, inner.h, inner.w), (2, 3, 3, 8))

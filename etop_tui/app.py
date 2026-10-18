@@ -17,18 +17,10 @@ from .collect import CpuCollector, CpuSample, MemSample, read_meminfo, read_upti
 from .gpu import DemoBackend, GpuMonitor, GpuSample, detect_backends
 from .render import (
     Palette,
-    compute_layout,
-    draw_compact,
-    draw_cpu,
-    draw_footer,
-    draw_gpu,
-    draw_gpu_list,
-    draw_header,
-    draw_help,
-    draw_mem,
-    draw_too_small,
-    draw_vram,
     compact_metrics_for_height,
+    draw_compact,
+    draw_help,
+    draw_too_small,
     format_bytes,
     format_uptime,
     load_band,
@@ -113,96 +105,36 @@ class App:
         try:
             rows, cols = self.screen.getmaxyx()
             self.screen.erase()
-            has_vram = any(gpu.mem_total for gpu in self.gpus)
-            layout = compute_layout(rows, cols, len(self.gpus), has_vram)
-            if layout is None:
-                if not draw_compact(
+            if not draw_compact(
+                self.screen,
+                rows,
+                cols,
+                self.cpu_sample,
+                self.mem_sample,
+                self.gpus,
+                self.pal,
+                self.options.ascii,
+                self.hostname,
+                self.uptime,
+                self.loads,
+                self.options.delay,
+                self.paused,
+            ):
+                needed = len(
+                    compact_metrics_for_height(
+                        rows,
+                        self.cpu_sample,
+                        self.mem_sample,
+                        self.gpus,
+                        self.options.ascii,
+                    )
+                )
+                draw_too_small(
                     self.screen,
                     rows,
                     cols,
-                    self.cpu_sample,
-                    self.mem_sample,
-                    self.gpus,
                     self.pal,
-                    self.options.ascii,
-                    self.hostname,
-                    self.uptime,
-                    self.loads,
-                    self.options.delay,
-                    self.paused,
-                ):
-                    needed = len(
-                        compact_metrics_for_height(
-                            rows,
-                            self.cpu_sample,
-                            self.mem_sample,
-                            self.gpus,
-                            self.options.ascii,
-                        )
-                    )
-                    draw_too_small(
-                        self.screen,
-                        rows,
-                        cols,
-                        self.pal,
-                        min_rows=max(4, needed + 2),
-                    )
-            else:
-                draw_header(
-                    self.screen,
-                    layout.header,
-                    self.hostname,
-                    self.uptime,
-                    self.loads,
-                    self.options.delay,
-                    self.paused,
-                    self.pal,
-                )
-                draw_cpu(
-                    self.screen,
-                    layout.panels["cpu"],
-                    self.cpu_sample,
-                    self.pal,
-                    self.options.ascii,
-                )
-                draw_mem(
-                    self.screen,
-                    layout.panels["mem"],
-                    self.mem_sample,
-                    self.pal,
-                    self.options.ascii,
-                )
-                if "gpu" in layout.panels:
-                    if len(self.gpus) > 1:
-                        draw_gpu_list(
-                            self.screen,
-                            layout.panels["gpu"],
-                            self.gpus,
-                            self.pal,
-                            self.options.ascii,
-                        )
-                    else:
-                        draw_gpu(
-                            self.screen,
-                            layout.panels["gpu"],
-                            self.gpus,
-                            self.pal,
-                            self.options.ascii,
-                        )
-                if "vram" in layout.panels:
-                    draw_vram(
-                        self.screen,
-                        layout.panels["vram"],
-                        self.gpus,
-                        self.pal,
-                        self.options.ascii,
-                    )
-                draw_footer(
-                    self.screen,
-                    layout.footer,
-                    self.options.delay,
-                    self.paused,
-                    self.pal,
+                    min_rows=max(4, needed + 2),
                 )
             self.screen.refresh()
         except curses.error:
