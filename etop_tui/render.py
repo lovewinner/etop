@@ -321,12 +321,14 @@ def draw_header(
     hostname: str,
     uptime: float,
     loads: Sequence[float],
+    tasks: Tuple[int, int],
+    gpu_tasks: Optional[int],
     interval: float,
     paused: bool,
     pal: Palette,
 ) -> None:
-    """Two-line header: identity/uptime/clock, then load averages."""
-    left = f" etop {__version__}  {hostname}"
+    """Two-line header: identity/uptime/clock, then load and task counts."""
+    left = f" {hostname}"
     uptime_text = f"up {format_uptime(uptime)}"
     clock = " " + time.strftime("%H:%M:%S") + " "
 
@@ -340,7 +342,10 @@ def draw_header(
 
     load_text = (
         f"load {loads[0]:.2f} {loads[1]:.2f} {loads[2]:.2f}"
+        f"  cpu {tasks[0]}/{tasks[1]}"
     )
+    if gpu_tasks is not None:
+        load_text += f"  gpu {gpu_tasks}"
     if paused:
         load_text += "  PAUSED"
     put(win, rect.y + 1, 1, load_text[: max(0, rect.w - 1)], pal.attr("dim"))
@@ -349,16 +354,17 @@ def draw_header(
 def draw_footer(
     win, rect: Rect, interval: float, paused: bool, pal: Palette
 ) -> None:
+    version = f" etop {__version__}"
     if rect.w < 62:
-        text = " q quit  p pause  +/-  h help"
+        text = f"{version}  q quit  p pause  +/-  h help"
     else:
         text = (
-            f" q quit   p pause   +/- interval   h help"
+            f"{version}  q quit   p pause   +/- interval   h help"
             f"     {interval:.2f}s"
         )
     if paused:
-        text += "   PAUSED"
-    put(win, rect.y, 1, text, pal.attr("dim"))
+        text += "  PAUSED"
+    put(win, rect.y, 0, text, pal.attr("dim"))
 
 
 @dataclass(frozen=True)
@@ -450,6 +456,8 @@ def draw_compact(
     hostname: str,
     uptime: float,
     loads: Sequence[float],
+    tasks: Tuple[int, int],
+    gpu_tasks: Optional[int],
     interval: float,
     paused: bool,
 ) -> bool:
@@ -461,7 +469,18 @@ def draw_compact(
     if layout is None:
         return False
     start, header, footer = layout
-    draw_header(win, header, hostname, uptime, loads, interval, paused, pal)
+    draw_header(
+        win,
+        header,
+        hostname,
+        uptime,
+        loads,
+        tasks,
+        gpu_tasks,
+        interval,
+        paused,
+        pal,
+    )
 
     label_width = max(5, max(len(metric.label) for metric in metrics) + 1)
     meter_x = 1 + label_width

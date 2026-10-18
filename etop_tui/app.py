@@ -13,7 +13,14 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 from . import __version__
-from .collect import CpuCollector, CpuSample, MemSample, read_meminfo, read_uptime
+from .collect import (
+    CpuCollector,
+    CpuSample,
+    MemSample,
+    read_meminfo,
+    read_task_counts,
+    read_uptime,
+)
 from .gpu import DemoBackend, GpuMonitor, GpuSample, detect_backends
 from .render import (
     Palette,
@@ -81,6 +88,8 @@ class App:
         self.mem_sample: Optional[MemSample] = None
         self.gpus: List[GpuSample] = []
         self.loads = (0.0, 0.0, 0.0)
+        self.tasks = (0, 0)
+        self.gpu_tasks: Optional[int] = None
         self.uptime = 0.0
         self.paused = False
         self.next_tick = 0.0
@@ -95,9 +104,14 @@ class App:
         except OSError:
             self.loads = (0.0, 0.0, 0.0)
         try:
+            self.tasks = read_task_counts()
+        except (OSError, ValueError, IndexError):
+            self.tasks = (0, 0)
+        try:
             self.uptime = read_uptime()
         except OSError:
             pass
+        self.gpu_tasks = self.gpu_monitor.task_count()
 
     def _draw(self) -> None:
         if self.cpu_sample is None or self.mem_sample is None:
@@ -117,6 +131,8 @@ class App:
                 self.hostname,
                 self.uptime,
                 self.loads,
+                self.tasks,
+                self.gpu_tasks,
                 self.options.delay,
                 self.paused,
             ):

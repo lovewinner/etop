@@ -30,16 +30,16 @@ etop
 ## 界面
 
 ```text
- etop 0.1.0  host  up 11d 16h              11:26:56
- load 0.14 0.37 0.36
+ host  up 11d 16h                        11:26:56
+ load 0.14 0.37 0.36  cpu 2/2028  gpu 4
  CPU  ||||||||||||||||||                    12.4%
  MEM  ||||||||||||||||                 61.5% 9.6/15.6G
  GPU  |||||||||||||||||||||                  54°C
  VRAM ||||||||||||||||||||||||     14.9/16G(93.4%)
- q quit  p pause  +/-  h help
+ etop 0.1.0  q quit  p pause  +/-  h help
 ```
 
-所有指标（CPU、内存、GPU、显存）都使用 htop 风格的彩色 `|` 条。
+版本信息位于底部左下角 footer；第二行还显示 CPU 任务数（running/total 线程）和 GPU 任务数（检测到 GPU 时）。所有指标（CPU、内存、GPU、显存）都使用 htop 风格的彩色 `|` 条。
 
 颜色按 4 档分色：低于 40% 绿色、40–60% 黄色、60–85% 橙色、85% 以上红色。分档作用于所有进度条。`--once` 在彩色终端下同样着色；256 色终端使用低饱和度的绿/黄/橙/红（#87AF87 / #D7D787 / #D7AF87 / #D78787），8 色终端会合并中间两档。若终端不支持颜色，则用加粗/下划线区分档位。背景始终沿用终端默认设置，不写入背景色，也不会回退到黑色；同时不使用 faint/dim 属性，避免部分终端把它渲染成底色。终端主题开启透明背景时即可透出桌面。
 
@@ -74,7 +74,8 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
   - NVIDIA：`nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu`；
   - AMD / 其他 DRM 驱动：`/sys/class/drm/card*/device/gpu_busy_percent`、`mem_info_vram_used`、`mem_info_vram_total`、`hwmon/*/temp1_input`。
   - 未检测到 GPU 时自动隐藏 GPU 与显存行；驱动短暂失败时保留上一帧并标记 `stale`。
-- **Load / uptime**：`os.getloadavg()` 与 `/proc/uptime`。
+- **Load / uptime / tasks**：`os.getloadavg()`、`/proc/uptime`，任务数取自 `/proc/loadavg` 的 `running/total`。
+- **GPU 任务数**：NVIDIA 统计 `nvidia-smi --query-compute-apps=pid` 的唯一 PID 数；sysfs 后端近似统计持有 `/dev/dri` 文件描述符的进程数。
 
 ## 多 GPU
 
@@ -94,13 +95,13 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 每项指标占一行（标签 + 彩色 `|` 条 + 右对齐文字），最小 **44x5**。**44x5 只显示 CPU 和内存，不显示 GPU/显存**；44x6 起在 GPU 行放得下时显示 GPU，空间不足时会省略底部快捷键行。因此在 **44x8** 下仍能同时显示 CPU、内存、GPU、显存四项：
 
 ```text
- etop 0.1.0  host  up 2h          14:03
- load 0.14 0.37 0.36
+ host  up 2h                      14:03
+ load 0.14 0.37 0.36  cpu 2/2028  gpu 4
  CPU  ||||||||||                    53.7%
  MEM  ||||                    77/504G(15.2%)
  GPU  ||||||||||                          54°C
  VRAM ||                       1.2/24G(5.0%)
- q quit  p pause  +/-  h help
+ etop 0.1.0  q quit  p pause  +/-  h help
 ```
 
 多 GPU 时会把每张卡写成：
@@ -117,14 +118,14 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 44x5 时仅保留 CPU 和内存两行：
 
 ```text
- etop 0.1.0  host  up 2h          14:03
- load 0.14 0.37 0.36
+ host  up 2h                      14:03
+ load 0.14 0.37 0.36  cpu 2/2028  gpu 4
  CPU  ||||||||||            53.7%
  MEM  ||||              77/504G(15.2%)
- q quit  p pause  +/-  h help
+ etop 0.1.0  q quit  p pause  +/-  h help
 ```
 
-空间富余时在底部留白。低于 **44x5** 时显示提示。
+空间富余时在底部留白。极紧尺寸下 footer（含版本和快捷键）会自动省略，以保留全部指标行；低于 **44x5** 时显示提示。
 
 ## 测试
 

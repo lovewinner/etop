@@ -7,6 +7,7 @@ from etop_tui.gpu import (
     GpuSample,
     SysfsGpuBackend,
     parse_nvidia_csv,
+    parse_nvidia_task_pids,
 )
 
 NVIDIA_CSV = """0, NVIDIA GeForce RTX 4090, 42, 1234, 24564, 54
@@ -35,6 +36,11 @@ class NvidiaParseTests(unittest.TestCase):
     def test_parse_garbage(self):
         self.assertEqual(parse_nvidia_csv(""), [])
         self.assertEqual(parse_nvidia_csv("not,a,gpu"), [])
+
+    def test_task_pids(self):
+        self.assertEqual(parse_nvidia_task_pids("123\n456\n123\n"), 2)
+        self.assertEqual(parse_nvidia_task_pids(""), 0)
+        self.assertEqual(parse_nvidia_task_pids("N/A\n"), 0)
 
 
 class SysfsTests(unittest.TestCase):
@@ -101,6 +107,18 @@ class MonitorTests(unittest.TestCase):
     def test_empty(self):
         monitor = GpuMonitor([_EmptyBackend()])
         self.assertEqual(monitor.sample(), [])
+        self.assertIsNone(monitor.task_count())
+
+    def test_task_count_sums_backends(self):
+        class _Tasks:
+            def sample(self):
+                return []
+
+            def task_count(self):
+                return 3
+
+        monitor = GpuMonitor([_Tasks(), _Tasks()])
+        self.assertEqual(monitor.task_count(), 6)
 
 
 if __name__ == "__main__":

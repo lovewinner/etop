@@ -2,7 +2,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from etop_tui.collect import CpuCollector, MemSample, read_cpu_times, read_meminfo
+from etop_tui.collect import (
+    CpuCollector,
+    MemSample,
+    read_cpu_times,
+    read_meminfo,
+    read_task_counts,
+)
 
 STAT_A = """cpu  100 0 100 700 100 0 0 0 0 0
 cpu0 100 0 100 700 100 0 0 0 0 0
@@ -68,6 +74,14 @@ class CpuCollectorTests(unittest.TestCase):
             overall, cores = read_cpu_times(str(path))
         self.assertEqual(overall.total, 1000)
         self.assertEqual(len(cores), 2)
+
+
+class TaskCountTests(unittest.TestCase):
+    def test_read_task_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "loadavg"
+            path.write_text("0.23 0.40 0.35 2/2028 1060386\n")
+            self.assertEqual(read_task_counts(str(path)), (2, 2028))
 
 
 class MemInfoTests(unittest.TestCase):

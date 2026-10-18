@@ -15,6 +15,7 @@ import math
 import os
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, replace
 from typing import Iterable, List, Optional
 
@@ -53,6 +54,16 @@ def _number(text: str) -> Optional[float]:
         return None
 
 
+def parse_nvidia_task_pids(text: str) -> int:
+    """Count unique PIDs from nvidia-smi compute-apps output."""
+    pids = {
+        int(line.strip())
+        for line in text.splitlines()
+        if line.strip().isdigit()
+    }
+    return len(pids)
+
+
 def parse_nvidia_csv(text: str) -> List[GpuSample]:
     """Parse `nvidia-smi --format=csv,noheader,nounits` output."""
     gpus: List[GpuSample] = []
@@ -89,6 +100,8 @@ class NvidiaBackend:
 
     def __init__(self, executable: Optional[str] = None) -> None:
         self.executable = executable or shutil.which("nvidia-smi")
+        self._tasks_at = -1.0
+        self._tasks_value: Optional[int] = None
 
     def available(self) -> bool:
         return bool(self.executable)
@@ -112,6 +125,32 @@ class NvidiaBackend:
         if completed.returncode != 0:
             return []
         return parse_nvidia_csv(completed.stdout)
+
+    def task_count(self) -> Optional[int]:
+        """Number of unique compute processes across all GPUs."""
+        if not self.executable:
+            return None
+        now = time.monotonic()
+        if now - self._tasks_at < 1.0:
+            return self._tasks_value
+        try:
+            completed = subprocess.run(
+                [
+                    self.executable,
+                    "--query-compute-apps=pid",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return self._tasks_value
+        if completed.returncode != 0:
+            return self._tasks_value
+        self._tasks_at = now
+        self._tasks_value = parse_nvidia_task_pids(completed.stdout)
+        return self._tasks_value
 
 
 def _read(path: str) -> Optional[str]:
@@ -142,6 +181,8 @@ class SysfsGpuBackend:
 
     def __init__(self, root: str = "/sys/class/drm") -> None:
         self.root = root
+        self._tasks_at = -1.0
+        self._tasks_value: Optional[int] = None
 
     def _devices(self) -> List[str]:
         devices: List[str] = []
@@ -159,6 +200,29 @@ class SysfsGpuBackend:
 
     def available(self) -> bool:
         return bool(self._devices())
+
+    def task_count(self) -> Optional[int]:
+        """Best-effort count of processes holding a /dev/dri file descriptor."""
+        now = time.monotonic()
+        if now - self._tasks_at < 1.0:
+            return self._tasks_value
+        pids = set()
+        for fd_dir in glob.glob("/proc/[0-9]*/fd"):
+            pid = fd_dir.split("/")[2]
+            try:
+                for fd in os.listdir(fd_dir):
+                    try:
+                        target = os.readlink(os.path.join(fd_dir, fd))
+                    except OSError:
+                        continue
+                    if target.startswith("/dev/dri/"):
+                        pids.add(pid)
+                        break
+            except OSError:
+                continue
+        self._tasks_at = now
+        self._tasks_value = len(pids)
+        return self._tasks_value
 
     def sample(self) -> List[GpuSample]:
         gpus: List[GpuSample] = []
@@ -202,6 +266,9 @@ class DemoBackend:
     def available(self) -> bool:
         return True
 
+    def task_count(self) -> Optional[int]:
+        return 1
+
     def sample(self) -> List[GpuSample]:
         self._tick += 1
         util = 55.0 + 35.0 * math.sin(self._tick / 4.0)
@@ -239,6 +306,20 @@ class GpuMonitor:
         if samples:
             self._last = samples
         return samples
+
+    def task_count(self) -> Optional[int]:
+        counts = []
+        for backend in self.backends:
+            counter = getattr(backend, "task_count", None)
+            if counter is None:
+                continue
+            try:
+                value = counter()
+            except Exception:
+                continue
+            if value is not None:
+                counts.append(value)
+        return sum(counts) if counts else None
 
 
 def detect_backends(explicit: str = "auto") -> List[object]:

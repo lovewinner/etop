@@ -193,3 +193,11 @@ def read_uptime(path: str = "/proc/uptime") -> float:
     """Return system uptime in seconds."""
     with open(path, "r", encoding="utf-8") as handle:
         return float(handle.read().split()[0])
+
+
+def read_task_counts(path: str = "/proc/loadavg") -> Tuple[int, int]:
+    """Return (running, total) task counts from /proc/loadavg."""
+    with open(path, "r", encoding="utf-8") as handle:
+        parts = handle.read().split()
+    running, total = parts[3].split("/", 1)
+    return int(running), int(total)
