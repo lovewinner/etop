@@ -29,8 +29,12 @@ from .render import (
     draw_vram,
     format_bytes,
     format_uptime,
+    load_band,
     meter_parts,
 )
+
+_ANSI_COLORS = {"good": "\033[32m", "warn": "\033[33m", "bad": "\033[31m"}
+_ANSI_RESET = "\033[0m"
 
 
 @dataclass
@@ -261,6 +265,12 @@ def print_once(options: Options) -> None:
     print()
 
     width = 28
+    use_ansi = (
+        options.color
+        and not os.environ.get("NO_COLOR")
+        and hasattr(sys.stdout, "isatty")
+        and sys.stdout.isatty()
+    )
 
     def row(label: str, pct: Optional[float], extra: str = "") -> None:
         if pct is None:
@@ -269,6 +279,10 @@ def print_once(options: Options) -> None:
         else:
             filled, empty = meter_parts(pct, width, ascii_mode)
             percent = f"{pct:5.1f}%"
+            if use_ansi:
+                colour = _ANSI_COLORS[load_band(pct)]
+                filled = colour + filled + _ANSI_RESET
+                percent = colour + percent + _ANSI_RESET
         line = f"{label:<6}{percent}  [{filled}{empty}]"
         if extra:
             line += "  " + extra

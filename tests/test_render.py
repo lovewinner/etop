@@ -7,6 +7,8 @@ from etop_tui.render import (
     format_bytes,
     format_uptime,
     graph_lines,
+    graph_matrix,
+    load_band,
     meter_parts,
 )
 
@@ -22,6 +24,16 @@ class MeterTests(unittest.TestCase):
     def test_bounds(self):
         self.assertEqual(meter_parts(-5, 10), ("", " " * 10))
         self.assertEqual(meter_parts(150, 10), ("█" * 10, ""))
+
+
+class ColourBandTests(unittest.TestCase):
+    def test_thresholds(self):
+        self.assertEqual(load_band(0), "good")
+        self.assertEqual(load_band(59.9), "good")
+        self.assertEqual(load_band(60), "warn")
+        self.assertEqual(load_band(84.9), "warn")
+        self.assertEqual(load_band(85), "bad")
+        self.assertEqual(load_band(100), "bad")
 
 
 class GraphTests(unittest.TestCase):
@@ -40,6 +52,18 @@ class GraphTests(unittest.TestCase):
         empty = graph_lines([0.0] * 20, 10, 2)
         self.assertTrue(all(ch == " " for line in empty for ch in line))
         self.assertTrue(all(0x2800 <= ord(ch) <= 0x28FF for ch in "".join(full) if ch != " "))
+
+    def test_matrix_keeps_per_column_values(self):
+        matrix = graph_matrix([10.0, 10.0, 70.0, 70.0, 95.0, 95.0], 3, 2)
+        self.assertEqual(len(matrix), 2)
+        self.assertEqual(len(matrix[0]), 3)
+        values = {
+            value
+            for row in matrix
+            for character, value in row
+            if value is not None and character != " "
+        }
+        self.assertEqual(values, {10.0, 70.0, 95.0})
 
 
 class FormatTests(unittest.TestCase):

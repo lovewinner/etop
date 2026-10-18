@@ -23,6 +23,15 @@ def _clamp(value: float) -> float:
     return max(0.0, min(100.0, float(value)))
 
 
+def load_band(pct: float) -> str:
+    """Map a utilisation percentage to a colour band."""
+    if pct >= 85:
+        return "bad"
+    if pct >= 60:
+        return "warn"
+    return "good"
+
+
 def format_bytes(value: Optional[int]) -> str:
     if value is None:
         return "n/a"
@@ -61,11 +70,13 @@ class Palette:
         except curses.error:
             self.color = False
             return
+        backgrounds = []
         try:
             curses.use_default_colors()
-            background = -1
+            backgrounds.append(-1)
         except curses.error:
-            background = curses.COLOR_BLACK
+            pass
+        backgrounds.append(curses.COLOR_BLACK)
         colours = {
             "normal": curses.COLOR_WHITE,
             "label": curses.COLOR_CYAN,
@@ -76,11 +87,15 @@ class Palette:
             "accent": curses.COLOR_MAGENTA,
         }
         for index, (name, foreground) in enumerate(colours.items(), start=1):
-            try:
-                curses.init_pair(index, foreground, background)
-            except curses.error:
-                continue
-            self._pairs[name] = index
+            for background in backgrounds:
+                try:
+                    curses.init_pair(index, foreground, background)
+                except curses.error:
+                    continue
+                self._pairs[name] = index
+                break
+        # If no pair could be initialised, fall back to monochrome attributes.
+        self.color = bool(self._pairs)
 
     def attr(self, name: str = "normal", bold: bool = False) -> int:
         base = 0
@@ -95,11 +110,15 @@ class Palette:
         return base
 
     def level_attr(self, pct: float) -> int:
-        if pct >= 85:
-            return self.attr("bad", bold=True)
-        if pct >= 60:
-            return self.attr("warn", bold=True)
-        return self.attr("good", bold=True)
+        band = load_band(pct)
+        if not self.color or band not in self._pairs:
+            # Monochrome fallback so the bands remain distinguishable.
+            if band == "bad":
+                return curses.A_BOLD | curses.A_REVERSE
+            if band == "warn":
+                return curses.A_BOLD
+            return curses.A_NORMAL
+        return self.attr(band, bold=True)
 
 
 def put(win, y: int, x: int, text: str, attr: int = 0) -> None:
@@ -284,6 +303,66 @@ def draw_meter(
     put(win, y, x + bar_width, suffix, attr)
 
 
+def graph_matrix(
+    values: Iterable[float],
+    width: int,
+    height: int,
+    vmax: float = 100.0,
+    ascii_mode: bool = False,
+) -> List[List[Tuple[str, Optional[float]]]]:
+    """Render a history graph as rows of (character, column value) cells.
+
+    The value attached to each cell is the average utilisation of that column,
+    which lets the caller colour every segment according to its own load band.
+    """
+    if width <= 0 or height <= 0:
+        return []
+    data = list(values)[-width * 2 :]
+    padded: List[Optional[float]] = [None] * (width * 2 - len(data)) + data
+
+    columns: List[Optional[float]] = []
+    for column in range(width):
+        pair = [
+            value
+            for value in padded[column * 2 : column * 2 + 2]
+            if value is not None
+        ]
+        columns.append(sum(pair) / len(pair) if pair else None)
+
+    dot_height = height * 4
+    matrix: List[List[Tuple[str, Optional[float]]]] = []
+    for row in range(height):
+        cells: List[Tuple[str, Optional[float]]] = []
+        for column, column_value in enumerate(columns):
+            if column_value is None:
+                cells.append((" ", None))
+                continue
+            if ascii_mode:
+                ratio = max(0.0, min(1.0, column_value / vmax))
+                filled_rows = int(round(ratio * height))
+                if ratio > 0:
+                    filled_rows = max(1, filled_rows)
+                character = "#" if row >= height - filled_rows else " "
+            else:
+                bits = 0
+                for sub_column in (0, 1):
+                    value = padded[column * 2 + sub_column]
+                    if value is None:
+                        continue
+                    ratio = max(0.0, min(1.0, value / vmax))
+                    level = int(round(ratio * dot_height))
+                    if ratio > 0:
+                        level = max(1, level)
+                    for sub_row in range(4):
+                        from_bottom = (height - row - 1) * 4 + (3 - sub_row)
+                        if from_bottom < level:
+                            bits |= _DOTS[sub_column][sub_row]
+                character = chr(0x2800 + bits) if bits else " "
+            cells.append((character, column_value if character != " " else None))
+        matrix.append(cells)
+    return matrix
+
+
 def graph_lines(
     values: Iterable[float],
     width: int,
@@ -292,49 +371,10 @@ def graph_lines(
     ascii_mode: bool = False,
 ) -> List[str]:
     """Render a filled history graph, newest sample on the right."""
-    if width <= 0 or height <= 0:
-        return []
-    data = list(values)[-width * 2 :]
-    padded: List[Optional[float]] = [None] * (width * 2 - len(data)) + data
-    if ascii_mode:
-        canvas = [[" "] * width for _ in range(height)]
-        for column in range(width):
-            pair = [
-                value
-                for value in padded[column * 2 : column * 2 + 2]
-                if value is not None
-            ]
-            if not pair:
-                continue
-            ratio = max(0.0, min(1.0, (sum(pair) / len(pair)) / vmax))
-            filled_rows = int(round(ratio * height))
-            if ratio > 0:
-                filled_rows = max(1, filled_rows)
-            for row in range(height - filled_rows, height):
-                canvas[row][column] = "#"
-        return ["".join(row) for row in canvas]
-
-    lines: List[str] = []
-    dot_height = height * 4
-    for row in range(height):
-        chars: List[str] = []
-        for column in range(width):
-            bits = 0
-            for sub_column in (0, 1):
-                value = padded[column * 2 + sub_column]
-                if value is None:
-                    continue
-                ratio = max(0.0, min(1.0, value / vmax))
-                level = int(round(ratio * dot_height))
-                if ratio > 0:
-                    level = max(1, level)
-                for sub_row in range(4):
-                    from_bottom = (height - row - 1) * 4 + (3 - sub_row)
-                    if from_bottom < level:
-                        bits |= _DOTS[sub_column][sub_row]
-            chars.append(chr(0x2800 + bits) if bits else " ")
-        lines.append("".join(chars))
-    return lines
+    return [
+        "".join(character for character, _ in row)
+        for row in graph_matrix(values, width, height, vmax, ascii_mode)
+    ]
 
 
 def draw_graph(
@@ -347,12 +387,19 @@ def draw_graph(
 ) -> None:
     if rect.h <= 0 or rect.w <= 0:
         return
-    recent = [value for value in values if value is not None]
-    attr = pal.level_attr(recent[-1] if recent else 0.0)
-    for offset, line in enumerate(
-        graph_lines(values, rect.w, rect.h, vmax, ascii_mode)
+    for offset, row in enumerate(
+        graph_matrix(values, rect.w, rect.h, vmax, ascii_mode)
     ):
-        put(win, rect.y + offset, rect.x, line, attr)
+        for column, (character, value) in enumerate(row):
+            if character == " " or value is None:
+                continue
+            put(
+                win,
+                rect.y + offset,
+                rect.x + column,
+                character,
+                pal.level_attr(value),
+            )
 
 
 def draw_cpu(
