@@ -9,6 +9,7 @@ from etop_tui.render import (
     compact_bytes,
     compact_layout,
     compact_metrics,
+    compact_row_heights,
     compute_layout,
     format_bytes,
     format_uptime,
@@ -169,8 +170,8 @@ class CompactLayoutTests(unittest.TestCase):
         layout = compact_layout(8, 44, 4)
         self.assertIsNotNone(layout)
         start, header, footer = layout
-        self.assertEqual((start, header.y, footer.y), (2, 0, 7))
-        self.assertLessEqual(start + 4 - 1, footer.y - 1)
+        self.assertEqual((start, header.y, footer.y), (1, 0, 7))
+        self.assertEqual(compact_row_heights(6, 4), [2, 2, 1, 1])
 
     def test_44x8_fits_four_gpus(self):
         layout = compact_layout(8, 44, 6)
@@ -180,11 +181,19 @@ class CompactLayoutTests(unittest.TestCase):
         self.assertLessEqual(start + 6 - 1, footer.y - 1)
         self.assertIsNone(compact_layout(8, 44, 7))
 
-    def test_minimum_and_centering(self):
+    def test_minimum_and_top_alignment(self):
         self.assertEqual(compact_layout(6, 44, 4)[0], 1)
-        self.assertEqual(compact_layout(8, 44, 2)[0], 3)
+        self.assertEqual(compact_layout(8, 44, 2)[0], 1)
         self.assertIsNone(compact_layout(5, 44, 4))
         self.assertIsNone(compact_layout(8, 39, 4))
+
+    def test_row_heights_fill_all_rows(self):
+        for available, count in ((6, 4), (12, 6), (14, 6), (22, 18)):
+            heights = compact_row_heights(available, count)
+            self.assertEqual(sum(heights), available)
+            self.assertTrue(all(height >= 1 for height in heights))
+        self.assertEqual(compact_row_heights(12, 6), [2, 2, 2, 2, 2, 2])
+        self.assertEqual(compact_row_heights(14, 6), [3, 3, 2, 2, 2, 2])
 
     def test_rows_do_not_overlap_footer(self):
         for rows in range(6, 20):
@@ -212,11 +221,14 @@ class CompactLayoutTests(unittest.TestCase):
             [metric.label for metric in metrics], ["CPU", "MEM", "GPU", "VRAM"]
         )
         self.assertAlmostEqual(metrics[0].pct, 42.0)
+        self.assertEqual(metrics[0].history_key, "cpu")
         self.assertEqual(metrics[0].detail, " 42.0%")
-        self.assertEqual(metrics[1].detail, " 50.0% 8.0/16G")
+        self.assertEqual(metrics[1].detail, "8.0/16G(50.0%)")
         self.assertEqual(metrics[2].detail, "54°C")
         self.assertAlmostEqual(metrics[3].pct, 2 / 24 * 100)
-        self.assertEqual(metrics[3].detail, "  8.3% 2.0/24G")
+        self.assertEqual(metrics[3].detail, "2.0/24G(8.3%)")
+        self.assertEqual(metrics[2].history_key, "gpu:0")
+        self.assertEqual(metrics[3].history_key, "vram:0")
 
     def test_multi_gpu_metrics_have_bars_and_aligned_text(self):
         cpu = CpuSample(10.0, ())
@@ -230,7 +242,8 @@ class CompactLayoutTests(unittest.TestCase):
             [metric.label for metric in metrics],
             ["CPU", "MEM", "GPU0", "GPU1"],
         )
-        self.assertIn("2.0/24G", metrics[2].detail)
+        self.assertIn("2.0/24G(8%)", metrics[2].detail)
+        self.assertIn("19.0/24G(79%)", metrics[3].detail)
         self.assertIn("54°C", metrics[2].detail)
         self.assertNotIn("RTX 4090", metrics[2].detail)
         self.assertNotIn("42.0%", metrics[2].detail)

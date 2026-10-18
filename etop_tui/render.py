@@ -724,22 +724,21 @@ def draw_gpu_list(
         return
 
     label_width = max(len(f"GPU{gpu.index}") for gpu in gpus) + 1
-    mem_texts = [
-        compact_bytes(gpu.mem_used, gpu.mem_total) for gpu in gpus
-    ]
+    mem_texts = []
+    for gpu in gpus:
+        text = compact_bytes(gpu.mem_used, gpu.mem_total)
+        if text and gpu.mem_pct is not None:
+            text = f"{text}({gpu.mem_pct:.0f}%)"
+        mem_texts.append(text)
     mem_width = max((len(text) for text in mem_texts), default=0)
     temp_texts = [_temp_text(gpu.temp, ascii_mode) for gpu in gpus]
     temp_width = max((len(text) for text in temp_texts), default=0)
-    has_vram_pct = any(gpu.mem_pct is not None for gpu in gpus)
 
     suffixes = []
     for index, gpu in enumerate(gpus):
         parts = []
         if mem_width:
             parts.append(mem_texts[index].rjust(mem_width))
-        if has_vram_pct:
-            pct_text = "" if gpu.mem_pct is None else f"{gpu.mem_pct:.0f}%"
-            parts.append(pct_text.rjust(4))
         if temp_width:
             parts.append(temp_texts[index].rjust(temp_width))
         if gpu.stale:
@@ -841,6 +840,7 @@ class CompactMetric:
     label: str
     pct: Optional[float]
     detail: str = ""
+    history_key: str = ""
 
 
 def compact_metrics(
@@ -852,31 +852,29 @@ def compact_metrics(
     """One row of data per metric, for terminals with very few rows."""
     mem_detail = compact_bytes(mem.used, mem.total)
     rows = [
-        CompactMetric("CPU", cpu.total, f"{cpu.total:5.1f}%"),
+        CompactMetric("CPU", cpu.total, f"{cpu.total:5.1f}%", "cpu"),
         CompactMetric(
             "MEM",
             mem.used_pct,
-            f"{mem.used_pct:5.1f}% {mem_detail}".rstrip(),
+            f"{mem_detail}({mem.used_pct:.1f}%)",
+            "mem",
         ),
     ]
     if len(gpus) > 1:
-        # Multi-GPU: bar for utilisation, aligned VRAM/temperature text after it.
-        mem_texts = [
-            compact_bytes(gpu.mem_used, gpu.mem_total) for gpu in gpus
-        ]
+        # Multi-GPU: util bar, then 'used/total(pct) temp' right-aligned.
+        mem_texts = []
+        for gpu in gpus:
+            text = compact_bytes(gpu.mem_used, gpu.mem_total)
+            if text and gpu.mem_pct is not None:
+                text = f"{text}({gpu.mem_pct:.0f}%)"
+            mem_texts.append(text)
         mem_width = max((len(text) for text in mem_texts), default=0)
         temp_texts = [_temp_text(gpu.temp, ascii_mode) for gpu in gpus]
         temp_width = max((len(text) for text in temp_texts), default=0)
-        has_vram_pct = any(gpu.mem_pct is not None for gpu in gpus)
         for index, gpu in enumerate(gpus):
             parts = []
             if mem_width:
                 parts.append(mem_texts[index].rjust(mem_width))
-            if has_vram_pct:
-                pct_text = (
-                    "" if gpu.mem_pct is None else f"{gpu.mem_pct:.0f}%"
-                )
-                parts.append(pct_text.rjust(4))
             if temp_width:
                 parts.append(temp_texts[index].rjust(temp_width))
             if gpu.stale:
@@ -886,6 +884,7 @@ def compact_metrics(
                     f"GPU{gpu.index}",
                     gpu.util,
                     " ".join(parts).rstrip(),
+                    f"gpu:{gpu.index}",
                 )
             )
         return rows
@@ -894,21 +893,31 @@ def compact_metrics(
         detail = _temp_text(primary.temp, ascii_mode)
         if primary.stale:
             detail = f"{detail} *".strip()
-        rows.append(CompactMetric("GPU", primary.util, detail))
+        rows.append(
+            CompactMetric(
+                "GPU",
+                primary.util,
+                detail,
+                f"gpu:{primary.index}",
+            )
+        )
     if gpus and gpus[0].mem_total:
         primary = gpus[0]
         detail = compact_bytes(primary.mem_used, primary.mem_total)
-        pct_text = (
-            "" if primary.mem_pct is None else f"{primary.mem_pct:5.1f}% "
-        )
+        if detail and primary.mem_pct is not None:
+            detail = f"{detail}({primary.mem_pct:.1f}%)"
         rows.append(
-            CompactMetric(
-                "VRAM",
-                primary.mem_pct,
-                f"{pct_text}{detail}".rstrip(),
-            )
+            CompactMetric("VRAM", primary.mem_pct, detail, f"vram:{primary.index}")
         )
     return rows
+
+
+def compact_row_heights(available: int, count: int) -> List[int]:
+    """Split the available rows evenly; extra rows become history strips."""
+    if count <= 0:
+        return []
+    base, remainder = divmod(max(0, available), count)
+    return [base + (1 if index < remainder else 0) for index in range(count)]
 
 
 def compact_layout(
@@ -917,8 +926,7 @@ def compact_layout(
     """Return (first_metric_row, header, footer) for the compact view."""
     if rows < 6 or cols < 40 or count <= 0 or count > rows - 2:
         return None
-    start = 1 + max(0, (rows - 2 - count) // 2)
-    return start, Rect(0, 0, 1, cols), Rect(rows - 1, 0, 1, cols)
+    return 1, Rect(0, 0, 1, cols), Rect(rows - 1, 0, 1, cols)
 
 
 def draw_compact(
@@ -928,6 +936,7 @@ def draw_compact(
     cpu: CpuSample,
     mem: MemSample,
     gpus: Sequence[GpuSample],
+    histories: Mapping[str, Sequence[float]],
     pal: Palette,
     ascii_mode: bool,
     hostname: str,
@@ -954,8 +963,9 @@ def draw_compact(
     bar_end = right_edge - max_suffix - 1 if max_suffix else right_edge
     bar_width = max(1, bar_end - meter_x)
 
-    for offset, metric in enumerate(metrics):
-        y = start + offset
+    heights = compact_row_heights(rows - 2, len(metrics))
+    y = start
+    for metric, height in zip(metrics, heights):
         put(win, y, 1, f"{metric.label:<{label_width}}", pal.attr("dim"))
         draw_bar(win, y, meter_x, bar_width, metric.pct, pal, ascii_mode)
         if metric.detail:
@@ -966,6 +976,17 @@ def draw_compact(
                 metric.detail,
                 pal.attr("dim"),
             )
+        if height > 1 and metric.history_key:
+            graph_width = right_edge - meter_x
+            if graph_width > 0:
+                draw_graph(
+                    win,
+                    Rect(y + 1, meter_x, height - 1, graph_width),
+                    histories.get(metric.history_key, ()),
+                    pal,
+                    ascii_mode,
+                )
+        y += height
 
     draw_footer(win, footer, interval, paused, pal)
     return True
