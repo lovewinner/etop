@@ -33,7 +33,7 @@ from .render import (
     format_bytes,
     format_uptime,
     load_band,
-    meter_parts,
+    pipe_parts,
 )
 
 _ANSI_COLORS = {
@@ -315,12 +315,16 @@ def print_once(options: Options) -> None:
         and sys.stdout.isatty()
     )
 
-    def row(label: str, pct: Optional[float], extra: str = "") -> None:
+    def row(
+        label: str,
+        pct: Optional[float],
+        extra: str = "",
+    ) -> None:
         if pct is None:
             filled, empty = " " * width, ""
             percent = "  n/a"
         else:
-            filled, empty = meter_parts(pct, width, ascii_mode)
+            filled, empty = pipe_parts(pct, width)
             percent = f"{pct:5.1f}%"
             if use_ansi:
                 colour = _ANSI_COLORS[load_band(pct)]

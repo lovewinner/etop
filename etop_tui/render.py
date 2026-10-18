@@ -14,7 +14,6 @@ from .gpu import GpuSample
 GIB = 1024 ** 3
 MIB = 1024 ** 2
 
-_PARTIAL = " ▏▎▍▌▋▊▉█"
 # Braille dot bits indexed by [column_in_cell][row_in_cell].
 _DOTS = ((0x01, 0x02, 0x04, 0x40), (0x08, 0x10, 0x20, 0x80))
 
@@ -305,23 +304,15 @@ def draw_panel(
     )
 
 
-def meter_parts(pct: float, width: int, ascii_mode: bool = False) -> Tuple[str, str]:
-    """Return (filled, empty) strings for a horizontal meter."""
+def pipe_parts(pct: float, width: int) -> Tuple[str, str]:
+    """htop-style utilisation bar made of coloured '|' cells."""
     if width <= 0:
         return "", ""
     pct = _clamp(pct)
-    if ascii_mode:
-        filled_count = int(round(pct / 100.0 * width))
-        return "#" * filled_count, " " * (width - filled_count)
-    units = int(round(pct / 100.0 * width * 8))
-    full, remainder = divmod(units, 8)
-    full = min(full, width)
-    if full >= width:
-        return "█" * width, ""
-    filled = "█" * full
-    if remainder:
-        filled += _PARTIAL[remainder]
-    return filled, " " * (width - len(filled))
+    filled_count = int(round(pct / 100.0 * width))
+    if 0 < pct and filled_count == 0:
+        filled_count = 1
+    return "|" * filled_count, " " * (width - filled_count)
 
 
 def draw_bar(
@@ -333,14 +324,14 @@ def draw_bar(
     pal: Palette,
     ascii_mode: bool = False,
 ) -> None:
-    """Draw a bar without the trailing percentage text."""
+    """Draw a '|' utilisation bar without the trailing percentage text."""
     if width <= 0:
         return
     if pct is None:
         put(win, y, x, " " * width, pal.attr("dim"))
         return
     pct = _clamp(pct)
-    filled, empty = meter_parts(pct, width, ascii_mode)
+    filled, empty = pipe_parts(pct, width)
     attr = pal.level_attr(pct)
     put(win, y, x, filled, attr)
     put(win, y, x + len(filled), empty, pal.attr("dim"))
@@ -366,7 +357,7 @@ def draw_meter(
         put(win, y, x + bar_width, suffix, pal.attr("dim"))
         return
     pct = _clamp(pct)
-    filled, empty = meter_parts(pct, bar_width, ascii_mode)
+    filled, empty = pipe_parts(pct, bar_width)
     attr = pal.level_attr(pct)
     put(win, y, x, filled, attr)
     put(win, y, x + len(filled), empty, pal.attr("dim"))
@@ -683,7 +674,16 @@ def draw_gpu(
             suffix = "  " + temperature
         if primary.stale:
             suffix += "  [stale]"
-        draw_meter(win, y, inner.x, inner.w, util, pal, ascii_mode, suffix=suffix)
+        draw_meter(
+            win,
+            y,
+            inner.x,
+            inner.w,
+            util,
+            pal,
+            ascii_mode,
+            suffix=suffix,
+        )
 
 
 def draw_vram(
@@ -975,7 +975,15 @@ def draw_compact(
     for offset, metric in enumerate(metrics):
         y = start + offset
         put(win, y, 1, f"{metric.label:<{label_width}}", pal.attr("dim"))
-        draw_bar(win, y, meter_x, bar_width, metric.pct, pal, ascii_mode)
+        draw_bar(
+            win,
+            y,
+            meter_x,
+            bar_width,
+            metric.pct,
+            pal,
+            ascii_mode,
+        )
         if metric.detail:
             put(
                 win,

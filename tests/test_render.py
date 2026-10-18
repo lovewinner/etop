@@ -16,21 +16,28 @@ from etop_tui.render import (
     graph_lines,
     graph_matrix,
     load_band,
-    meter_parts,
+    pipe_parts,
 )
 
 
 class MeterTests(unittest.TestCase):
-    def test_sizes(self):
+    def test_pipe_sizes(self):
         for pct in (0, 0.4, 1, 50, 99.9, 100):
-            filled, empty = meter_parts(pct, 20)
+            filled, empty = pipe_parts(pct, 20)
             self.assertEqual(len(filled) + len(empty), 20)
-            ascii_filled, ascii_empty = meter_parts(pct, 20, ascii_mode=True)
-            self.assertEqual(len(ascii_filled) + len(ascii_empty), 20)
 
-    def test_bounds(self):
-        self.assertEqual(meter_parts(-5, 10), ("", " " * 10))
-        self.assertEqual(meter_parts(150, 10), ("█" * 10, ""))
+    def test_pipe_bounds(self):
+        self.assertEqual(pipe_parts(-5, 10), ("", " " * 10))
+        self.assertEqual(pipe_parts(150, 10), ("|" * 10, ""))
+
+    def test_pipe_parts(self):
+        filled, empty = pipe_parts(50, 10)
+        self.assertEqual(filled, "|||||")
+        self.assertEqual(len(filled) + len(empty), 10)
+        self.assertEqual(pipe_parts(0, 10), ("", " " * 10))
+        self.assertEqual(pipe_parts(100, 10), ("|" * 10, ""))
+        self.assertEqual(pipe_parts(1, 100), ("|", " " * 99))
+        self.assertEqual(pipe_parts(0.1, 100), ("|", " " * 99))
 
 
 class ColourBandTests(unittest.TestCase):
