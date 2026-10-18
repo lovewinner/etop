@@ -49,8 +49,9 @@ class GraphTests(unittest.TestCase):
     def test_full_and_empty(self):
         full = graph_lines([100.0] * 20, 10, 2)
         self.assertTrue(all(ch != " " for line in full for ch in line[:10]))
-        empty = graph_lines([0.0] * 20, 10, 2)
-        self.assertTrue(all(ch == " " for line in empty for ch in line))
+        zero = graph_lines([0.0] * 20, 10, 2)
+        self.assertTrue(all(ch != " " for ch in zero[-1]))
+        self.assertTrue(all(ch == " " for row in zero[:-1] for ch in row))
         self.assertTrue(all(0x2800 <= ord(ch) <= 0x28FF for ch in "".join(full) if ch != " "))
 
     def test_matrix_keeps_per_column_values(self):
@@ -64,6 +65,22 @@ class GraphTests(unittest.TestCase):
             if value is not None and character != " "
         }
         self.assertEqual(values, {10.0, 70.0, 95.0})
+
+    def test_short_history_stretches_to_full_width(self):
+        matrix = graph_matrix([50.0], 5, 2)
+        values = {
+            value
+            for row in matrix
+            for character, value in row
+            if value is not None and character != " "
+        }
+        self.assertEqual(values, {50.0})
+        self.assertEqual(sum(1 for character, _ in matrix[1] if character != " "), 5)
+
+    def test_history_order_is_preserved(self):
+        matrix = graph_matrix([10.0, 90.0], 4, 2)
+        columns = [value for _, value in matrix[1]]
+        self.assertEqual(columns, [10.0, 10.0, 90.0, 90.0])
 
 
 class FormatTests(unittest.TestCase):

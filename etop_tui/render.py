@@ -77,13 +77,23 @@ class Palette:
         except curses.error:
             pass
         backgrounds.append(curses.COLOR_BLACK)
+        if curses.COLORS >= 256:
+            # Vivid xterm-256 colours; basic 8-colour themes sometimes map
+            # green/yellow/red to very similar shades.
+            good, warn, bad = 46, 226, 196
+        else:
+            good, warn, bad = (
+                curses.COLOR_GREEN,
+                curses.COLOR_YELLOW,
+                curses.COLOR_RED,
+            )
         colours = {
             "normal": curses.COLOR_WHITE,
             "label": curses.COLOR_CYAN,
             "title": curses.COLOR_CYAN,
-            "good": curses.COLOR_GREEN,
-            "warn": curses.COLOR_YELLOW,
-            "bad": curses.COLOR_RED,
+            "good": good,
+            "warn": warn,
+            "bad": bad,
             "accent": curses.COLOR_MAGENTA,
         }
         for index, (name, foreground) in enumerate(colours.items(), start=1):
@@ -318,7 +328,18 @@ def graph_matrix(
     if width <= 0 or height <= 0:
         return []
     data = list(values)[-width * 2 :]
-    padded: List[Optional[float]] = [None] * (width * 2 - len(data)) + data
+    if not data:
+        padded: List[Optional[float]] = [None] * (width * 2)
+    elif len(data) < width * 2:
+        # Stretch the short history across the whole graph instead of leaving
+        # most of it blank; the time scale settles once the buffer is full.
+        total = width * 2
+        padded = [
+            data[min(len(data) - 1, index * len(data) // total)]
+            for index in range(total)
+        ]
+    else:
+        padded = data
 
     columns: List[Optional[float]] = []
     for column in range(width):
@@ -339,9 +360,8 @@ def graph_matrix(
                 continue
             if ascii_mode:
                 ratio = max(0.0, min(1.0, column_value / vmax))
-                filled_rows = int(round(ratio * height))
-                if ratio > 0:
-                    filled_rows = max(1, filled_rows)
+                # Keep a one-row baseline so 0% still draws a continuous line.
+                filled_rows = max(1, int(round(ratio * height)))
                 character = "#" if row >= height - filled_rows else " "
             else:
                 bits = 0
@@ -350,9 +370,7 @@ def graph_matrix(
                     if value is None:
                         continue
                     ratio = max(0.0, min(1.0, value / vmax))
-                    level = int(round(ratio * dot_height))
-                    if ratio > 0:
-                        level = max(1, level)
+                    level = max(1, int(round(ratio * dot_height)))
                     for sub_row in range(4):
                         from_bottom = (height - row - 1) * 4 + (3 - sub_row)
                         if from_bottom < level:
