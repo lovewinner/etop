@@ -37,10 +37,10 @@ from .render import (
 )
 
 _ANSI_COLORS = {
-    "good": "\033[32m",
-    "warn": "\033[33m",
-    "orange": "\033[38;5;173m",
-    "bad": "\033[31m",
+    "good": "\033[38;5;108m",
+    "warn": "\033[38;5;186m",
+    "orange": "\033[38;5;180m",
+    "bad": "\033[38;5;174m",
 }
 _ANSI_RESET = "\033[0m"
 

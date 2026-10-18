@@ -106,8 +106,8 @@ class Palette:
             return
         backgrounds = [-1, curses.COLOR_BLACK]
         if curses.COLORS >= 256:
-            # Muted xterm-256 shades; pure 46/226/196 are harsh on the eyes.
-            good, warn, orange, bad = 71, 179, 173, 167
+            # Desaturated xterm-256 shades: sage / straw / sand / dusty red.
+            good, warn, orange, bad = 108, 186, 180, 174
         else:
             # 8-colour terminals collapse the middle two bands.
             good, warn, orange, bad = (

@@ -29,7 +29,7 @@ class CommandLineTests(unittest.TestCase):
             code = main(["--once", "--demo", "--ascii"])
         self.assertEqual(code, 0)
         output = buffer.getvalue()
-        self.assertIn("\033[32m", output)  # low CPU load is green
+        self.assertIn("\033[38;5;108m", output)  # low CPU load is sage green
         self.assertIn("\033[0m", output)
 
     def test_once_without_gpu(self):
