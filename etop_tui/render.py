@@ -856,7 +856,6 @@ class CompactMetric:
     label: str
     pct: Optional[float]
     detail: str = ""
-    history_key: str = ""
 
 
 def compact_metrics(
@@ -873,19 +872,14 @@ def compact_metrics(
         else f"{mem.used_pct:.1f}%"
     )
     rows = [
-        CompactMetric("CPU", cpu.total, f"{cpu.total:5.1f}%", "cpu"),
-        CompactMetric("MEM", mem.used_pct, mem_suffix, "mem"),
+        CompactMetric("CPU", cpu.total, f"{cpu.total:5.1f}%"),
+        CompactMetric("MEM", mem.used_pct, mem_suffix),
     ]
     if len(gpus) > 1:
         suffixes = _gpu_suffixes(gpus, ascii_mode)
         for index, gpu in enumerate(gpus):
             rows.append(
-                CompactMetric(
-                    f"GPU{gpu.index}",
-                    gpu.util,
-                    suffixes[index],
-                    f"gpu:{gpu.index}",
-                )
+                CompactMetric(f"GPU{gpu.index}", gpu.util, suffixes[index])
             )
         return rows
     if gpus:
@@ -893,36 +887,14 @@ def compact_metrics(
         detail = _temp_text(primary.temp, ascii_mode)
         if primary.stale:
             detail = f"{detail} *".strip()
-        rows.append(
-            CompactMetric(
-                "GPU",
-                primary.util,
-                detail,
-                f"gpu:{primary.index}",
-            )
-        )
+        rows.append(CompactMetric("GPU", primary.util, detail))
     if gpus and gpus[0].mem_total:
         primary = gpus[0]
         detail = compact_bytes(primary.mem_used, primary.mem_total)
         if primary.mem_pct is not None and detail:
             detail = f"{detail}({primary.mem_pct:.1f}%)"
-        rows.append(
-            CompactMetric(
-                "VRAM",
-                primary.mem_pct,
-                detail,
-                f"vram:{primary.index}",
-            )
-        )
+        rows.append(CompactMetric("VRAM", primary.mem_pct, detail))
     return rows
-
-
-def compact_row_heights(available: int, count: int) -> List[int]:
-    """Split the available rows evenly; extra rows become history strips."""
-    if count <= 0:
-        return []
-    base, remainder = divmod(max(0, available), count)
-    return [base + (1 if index < remainder else 0) for index in range(count)]
 
 
 def compact_layout(
@@ -941,7 +913,6 @@ def draw_compact(
     cpu: CpuSample,
     mem: MemSample,
     gpus: Sequence[GpuSample],
-    histories: Mapping[str, Sequence[float]],
     pal: Palette,
     ascii_mode: bool,
     hostname: str,
@@ -950,7 +921,7 @@ def draw_compact(
     interval: float,
     paused: bool,
 ) -> bool:
-    """Draw the four metrics without boxes, with spare rows used for sparklines."""
+    """Draw the four metrics without boxes, one row per metric."""
     metrics = compact_metrics(cpu, mem, gpus, ascii_mode)
     layout = compact_layout(rows, cols, len(metrics))
     if layout is None:
@@ -968,9 +939,8 @@ def draw_compact(
     bar_end = right_edge - max_suffix - 1 if max_suffix else right_edge
     bar_width = max(1, bar_end - meter_x)
 
-    heights = compact_row_heights(rows - 2, len(metrics))
-    y = start
-    for metric, height in zip(metrics, heights):
+    for offset, metric in enumerate(metrics):
+        y = start + offset
         put(win, y, 1, f"{metric.label:<{label_width}}", pal.attr("dim"))
         draw_bar(win, y, meter_x, bar_width, metric.pct, pal, ascii_mode)
         if metric.detail:
@@ -981,17 +951,6 @@ def draw_compact(
                 metric.detail,
                 pal.attr("dim"),
             )
-        if height > 1 and metric.history_key:
-            graph_width = right_edge - meter_x
-            if graph_width > 0:
-                draw_graph(
-                    win,
-                    Rect(y + 1, meter_x, height - 1, graph_width),
-                    histories.get(metric.history_key, ()),
-                    pal,
-                    ascii_mode,
-                )
-        y += height
 
     draw_footer(win, footer, interval, paused, pal)
     return True
