@@ -5,7 +5,7 @@ from __future__ import annotations
 import curses
 import time
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import __version__
 from .collect import CpuSample, MemSample
@@ -13,10 +13,6 @@ from .gpu import GpuSample
 
 GIB = 1024 ** 3
 MIB = 1024 ** 2
-
-# Braille dot bits indexed by [column_in_cell][row_in_cell].
-_DOTS = ((0x01, 0x02, 0x04, 0x40), (0x08, 0x10, 0x20, 0x80))
-
 
 def _clamp(value: float) -> float:
     return max(0.0, min(100.0, float(value)))
@@ -204,52 +200,39 @@ class Layout:
 def compute_layout(
     rows: int, cols: int, gpu_count: int, has_vram: bool
 ) -> Optional[Layout]:
-    """Divide the screen between the panels, or None if it is too small."""
+    """Divide the screen between the graph-free panels."""
     if rows < 10 or cols < 44:
         return None
 
     multi = gpu_count > 1
-    gpu_height = gpu_count + 2 if multi else 4
-    heights = {"cpu": 4, "mem": 5}
+    heights = {"cpu": 3, "mem": 5}
     if gpu_count:
-        heights["gpu"] = gpu_height
+        heights["gpu"] = gpu_count + 2 if multi else 3
     if has_vram and not multi:
         heights["vram"] = 4
 
     available = rows - 2  # header + footer
-    minimum = {"cpu": 3, "mem": 4}
-    if gpu_count:
-        minimum["gpu"] = gpu_height if multi else 4
-    if "vram" in heights:
-        minimum["vram"] = 3
-    while sum(heights.values()) > available:
-        shrinkable = [key for key in heights if heights[key] > minimum[key]]
-        if not shrinkable:
-            return None
-        key = max(shrinkable, key=lambda name: heights[name])
-        heights[key] -= 1
 
-    caps = {
-        "cpu": 2 + 20 + 1,
-        "mem": 2 + 20 + 3,
-        "gpu": gpu_height if multi else 2 + 14 + 2,
-        "vram": 2 + 12 + 2,
-    }
-    while sum(heights.values()) < available:
-        grew = False
-        for key in ("cpu", "mem", "gpu", "vram"):
-            if key in heights and heights[key] < caps[key] and sum(heights.values()) < available:
-                heights[key] += 1
-                grew = True
-        if not grew:
-            break
+    # Shrink optional detail rows first (VRAM usage text, then swap line)
+    # before falling back to the compact table.
+    if "vram" in heights and sum(heights.values()) > available:
+        heights["vram"] = 3
+    if sum(heights.values()) > available and heights["mem"] > 4:
+        heights["mem"] = 4
+    if sum(heights.values()) > available:
+        return None
+
+    order = [key for key in ("cpu", "mem", "gpu", "vram") if key in heights]
+    total = sum(heights.values())
+    spare = available - total
+    base, remainder = divmod(spare, len(order)) if order else (0, 0)
 
     panels: Dict[str, Rect] = {}
     y = 1
-    for key in ("cpu", "mem", "gpu", "vram"):
-        if key in heights:
-            panels[key] = Rect(y, 0, heights[key], cols)
-            y += heights[key]
+    for index, key in enumerate(order):
+        y += base + (1 if index < remainder else 0)
+        panels[key] = Rect(y, 0, heights[key], cols)
+        y += heights[key]
     return Layout(Rect(0, 0, 1, cols), panels, Rect(rows - 1, 0, 1, cols))
 
 
@@ -363,118 +346,10 @@ def draw_meter(
     put(win, y, x + bar_width, suffix, attr)
 
 
-def graph_matrix(
-    values: Iterable[float],
-    width: int,
-    height: int,
-    vmax: float = 100.0,
-    ascii_mode: bool = False,
-) -> List[List[Tuple[str, Optional[float]]]]:
-    """Render a history graph as rows of (character, column value) cells.
-
-    The value attached to each cell is the average utilisation of that column,
-    which lets the caller colour every segment according to its own load band.
-    """
-    if width <= 0 or height <= 0:
-        return []
-    data = list(values)[-width * 2 :]
-    if not data:
-        padded: List[Optional[float]] = [None] * (width * 2)
-    elif len(data) < width * 2:
-        # Stretch the short history across the whole graph instead of leaving
-        # most of it blank; the time scale settles once the buffer is full.
-        total = width * 2
-        padded = [
-            data[min(len(data) - 1, index * len(data) // total)]
-            for index in range(total)
-        ]
-    else:
-        padded = data
-
-    columns: List[Optional[float]] = []
-    for column in range(width):
-        pair = [
-            value
-            for value in padded[column * 2 : column * 2 + 2]
-            if value is not None
-        ]
-        columns.append(sum(pair) / len(pair) if pair else None)
-
-    dot_height = height * 4
-    matrix: List[List[Tuple[str, Optional[float]]]] = []
-    for row in range(height):
-        cells: List[Tuple[str, Optional[float]]] = []
-        for column, column_value in enumerate(columns):
-            if column_value is None:
-                cells.append((" ", None))
-                continue
-            if ascii_mode:
-                ratio = max(0.0, min(1.0, column_value / vmax))
-                # Keep a one-row baseline so 0% still draws a continuous line.
-                filled_rows = max(1, int(round(ratio * height)))
-                character = "#" if row >= height - filled_rows else " "
-            else:
-                bits = 0
-                for sub_column in (0, 1):
-                    value = padded[column * 2 + sub_column]
-                    if value is None:
-                        continue
-                    ratio = max(0.0, min(1.0, value / vmax))
-                    level = max(1, int(round(ratio * dot_height)))
-                    for sub_row in range(4):
-                        from_bottom = (height - row - 1) * 4 + (3 - sub_row)
-                        if from_bottom < level:
-                            bits |= _DOTS[sub_column][sub_row]
-                character = chr(0x2800 + bits) if bits else " "
-            cells.append((character, column_value if character != " " else None))
-        matrix.append(cells)
-    return matrix
-
-
-def graph_lines(
-    values: Iterable[float],
-    width: int,
-    height: int,
-    vmax: float = 100.0,
-    ascii_mode: bool = False,
-) -> List[str]:
-    """Render a filled history graph, newest sample on the right."""
-    return [
-        "".join(character for character, _ in row)
-        for row in graph_matrix(values, width, height, vmax, ascii_mode)
-    ]
-
-
-def draw_graph(
-    win,
-    rect: Rect,
-    values: Iterable[float],
-    pal: Palette,
-    ascii_mode: bool = False,
-    vmax: float = 100.0,
-) -> None:
-    if rect.h <= 0 or rect.w <= 0:
-        return
-    for offset, row in enumerate(
-        graph_matrix(values, rect.w, rect.h, vmax, ascii_mode)
-    ):
-        for column, (character, value) in enumerate(row):
-            if character == " " or value is None:
-                continue
-            put(
-                win,
-                rect.y + offset,
-                rect.x + column,
-                character,
-                pal.level_attr(value),
-            )
-
-
 def draw_cpu(
     win,
     rect: Rect,
     sample: CpuSample,
-    history: Sequence[float],
     pal: Palette,
     ascii_mode: bool,
 ) -> None:
@@ -490,33 +365,21 @@ def draw_cpu(
     inner = rect.inner()
     if inner.h <= 0 or inner.w <= 0:
         return
-    info_rows = 1 if inner.h >= 1 else 0
-    graph_h = max(0, inner.h - info_rows)
-    if graph_h:
-        draw_graph(
-            win,
-            Rect(inner.y, inner.x, graph_h, inner.w),
-            history,
-            pal,
-            ascii_mode,
-        )
-    if info_rows:
-        draw_meter(
-            win,
-            inner.y + graph_h,
-            inner.x,
-            inner.w,
-            sample.total,
-            pal,
-            ascii_mode,
-        )
+    draw_meter(
+        win,
+        inner.y,
+        inner.x,
+        inner.w,
+        sample.total,
+        pal,
+        ascii_mode,
+    )
 
 
 def draw_mem(
     win,
     rect: Rect,
     mem: MemSample,
-    history: Sequence[float],
     pal: Palette,
     ascii_mode: bool,
 ) -> None:
@@ -532,34 +395,16 @@ def draw_mem(
     inner = rect.inner()
     if inner.h <= 0 or inner.w <= 0:
         return
-    if inner.h >= 5:
-        info_rows = 3
-    elif inner.h >= 3:
-        info_rows = 2
-    elif inner.h >= 1:
-        info_rows = 1
-    else:
-        info_rows = 0
-    graph_h = max(0, inner.h - info_rows)
-    if graph_h:
-        draw_graph(
-            win,
-            Rect(inner.y, inner.x, graph_h, inner.w),
-            history,
-            pal,
-            ascii_mode,
-        )
-    y = inner.y + graph_h
-    if info_rows >= 1:
-        draw_meter(win, y, inner.x, inner.w, mem.used_pct, pal, ascii_mode)
-    if info_rows >= 2:
+    y = inner.y
+    draw_meter(win, y, inner.x, inner.w, mem.used_pct, pal, ascii_mode)
+    if inner.h >= 2:
         detail = (
             f"Used {format_bytes(mem.used)} / {format_bytes(mem.total)}"
             f"   Cache {format_bytes(mem.cache_total)}"
             f"   Avail {format_bytes(mem.available)}"
         )
-        put(win, y + 1, inner.x, detail, pal.attr("dim"))
-    if info_rows >= 3:
+        put(win, y + 1, inner.x, detail[: inner.w], pal.attr("dim"))
+    if inner.h >= 3:
         if mem.swap_total:
             swap = (
                 f"Swap {format_bytes(mem.swap_used)} / "
@@ -567,7 +412,7 @@ def draw_mem(
             )
         else:
             swap = "Swap disabled"
-        put(win, y + 2, inner.x, swap, pal.attr("dim"))
+        put(win, y + 2, inner.x, swap[: inner.w], pal.attr("dim"))
 
 
 def _temp_text(temp: Optional[float], ascii_mode: bool) -> str:
@@ -616,7 +461,6 @@ def draw_gpu(
     win,
     rect: Rect,
     gpus: Sequence[GpuSample],
-    histories: Mapping[str, Sequence[float]],
     pal: Palette,
     ascii_mode: bool,
 ) -> None:
@@ -638,58 +482,28 @@ def draw_gpu(
     if inner.h <= 0 or inner.w <= 0:
         return
 
-    if len(gpus) > 1:
-        for row, gpu in enumerate(gpus[: inner.h]):
-            value = gpu.util
-            suffix = f" {value:5.1f}%" if value is not None else "   n/a"
-            draw_meter(
-                win,
-                inner.y + row,
-                inner.x + 2,
-                inner.w - 2,
-                value,
-                pal,
-                ascii_mode,
-                suffix=suffix,
-            )
-            put(win, inner.y + row, inner.x, f"{gpu.index}", pal.attr("dim"))
-        return
-
-    info_rows = 1 if inner.h >= 1 else 0
-    graph_h = max(0, inner.h - info_rows)
-    if graph_h:
-        draw_graph(
-            win,
-            Rect(inner.y, inner.x, graph_h, inner.w),
-            histories.get(f"gpu:{primary.index}", ()),
-            pal,
-            ascii_mode,
-        )
-    y = inner.y + graph_h
-    if info_rows >= 1:
-        suffix = ""
-        temperature = _temp_text(primary.temp, ascii_mode)
-        if temperature:
-            suffix = "  " + temperature
-        if primary.stale:
-            suffix += "  [stale]"
-        draw_meter(
-            win,
-            y,
-            inner.x,
-            inner.w,
-            util,
-            pal,
-            ascii_mode,
-            suffix=suffix,
-        )
+    suffix = ""
+    temperature = _temp_text(primary.temp, ascii_mode)
+    if temperature:
+        suffix = "  " + temperature
+    if primary.stale:
+        suffix += "  [stale]"
+    draw_meter(
+        win,
+        inner.y,
+        inner.x,
+        inner.w,
+        util,
+        pal,
+        ascii_mode,
+        suffix=suffix,
+    )
 
 
 def draw_vram(
     win,
     rect: Rect,
     gpus: Sequence[GpuSample],
-    histories: Mapping[str, Sequence[float]],
     pal: Palette,
     ascii_mode: bool,
 ) -> None:
@@ -712,45 +526,13 @@ def draw_vram(
     if inner.h <= 0 or inner.w <= 0:
         return
 
-    if len(with_memory) > 1:
-        for row, gpu in enumerate(with_memory[: inner.h]):
-            value = gpu.mem_pct
-            used = format_bytes(gpu.mem_used)
-            total = format_bytes(gpu.mem_total)
-            suffix = f" {value:5.1f}%" if value is not None else "   n/a"
-            suffix += f"  {used}/{total}"
-            draw_meter(
-                win,
-                inner.y + row,
-                inner.x + 2,
-                inner.w - 2,
-                value,
-                pal,
-                ascii_mode,
-                suffix=suffix,
-            )
-            put(win, inner.y + row, inner.x, f"{gpu.index}", pal.attr("dim"))
-        return
-
-    info_rows = 2 if inner.h >= 4 else 1 if inner.h >= 1 else 0
-    graph_h = max(0, inner.h - info_rows)
-    if graph_h:
-        draw_graph(
-            win,
-            Rect(inner.y, inner.x, graph_h, inner.w),
-            histories.get(f"vram:{primary.index}", ()),
-            pal,
-            ascii_mode,
-        )
-    y = inner.y + graph_h
-    if info_rows >= 1:
-        draw_meter(win, y, inner.x, inner.w, pct, pal, ascii_mode)
-    if info_rows >= 2:
+    draw_meter(win, inner.y, inner.x, inner.w, pct, pal, ascii_mode)
+    if inner.h >= 2:
         detail = (
             f"{format_bytes(primary.mem_used)} / "
             f"{format_bytes(primary.mem_total)} used"
         )
-        put(win, y + 1, inner.x, detail, pal.attr("dim"))
+        put(win, inner.y + 1, inner.x, detail[: inner.w], pal.attr("dim"))
 
 
 def draw_gpu_list(
@@ -859,10 +641,10 @@ def draw_footer(
     win, rect: Rect, interval: float, paused: bool, pal: Palette
 ) -> None:
     if rect.w < 62:
-        text = " q quit  p pause  +/-  r reset  h help"
+        text = " q quit  p pause  +/-  h help"
     else:
         text = (
-            f" q quit   p pause   +/- interval   r reset   h help"
+            f" q quit   p pause   +/- interval   h help"
             f"     {interval:.2f}s"
         )
     if paused:
@@ -1017,7 +799,6 @@ def draw_help(win, interval: float, pal: Palette, ascii_mode: bool) -> None:
         " q, Esc      quit",
         " p, Space    pause / resume",
         " + / -       faster / slower refresh",
-        " r           reset history graphs",
         " h, ?        close this help",
         "",
         f" refresh interval: {interval:.2f}s",

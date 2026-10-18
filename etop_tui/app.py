@@ -9,9 +9,8 @@ import os
 import socket
 import sys
 import time
-from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Deque, Dict, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
 from . import __version__
 from .collect import CpuCollector, CpuSample, MemSample, read_meminfo, read_uptime
@@ -85,9 +84,6 @@ class App:
         self.cpu = CpuCollector()
         backends = [DemoBackend()] if options.demo else detect_backends(options.gpu)
         self.gpu_monitor = GpuMonitor(backends)
-        self.history: Dict[str, Deque[float]] = defaultdict(
-            lambda: deque(maxlen=4096)
-        )
         self.hostname = socket.gethostname()
         self.cpu_sample: Optional[CpuSample] = None
         self.mem_sample: Optional[MemSample] = None
@@ -110,14 +106,6 @@ class App:
             self.uptime = read_uptime()
         except OSError:
             pass
-
-        self.history["cpu"].append(self.cpu_sample.total)
-        self.history["mem"].append(self.mem_sample.used_pct)
-        for gpu in self.gpus:
-            if gpu.util is not None:
-                self.history[f"gpu:{gpu.index}"].append(gpu.util)
-            if gpu.mem_pct is not None:
-                self.history[f"vram:{gpu.index}"].append(gpu.mem_pct)
 
     def _draw(self) -> None:
         if self.cpu_sample is None or self.mem_sample is None:
@@ -174,7 +162,6 @@ class App:
                     self.screen,
                     layout.panels["cpu"],
                     self.cpu_sample,
-                    self.history["cpu"],
                     self.pal,
                     self.options.ascii,
                 )
@@ -182,7 +169,6 @@ class App:
                     self.screen,
                     layout.panels["mem"],
                     self.mem_sample,
-                    self.history["mem"],
                     self.pal,
                     self.options.ascii,
                 )
@@ -200,7 +186,6 @@ class App:
                             self.screen,
                             layout.panels["gpu"],
                             self.gpus,
-                            self.history,
                             self.pal,
                             self.options.ascii,
                         )
@@ -209,7 +194,6 @@ class App:
                         self.screen,
                         layout.panels["vram"],
                         self.gpus,
-                        self.history,
                         self.pal,
                         self.options.ascii,
                     )
@@ -265,9 +249,6 @@ class App:
                 )
                 self._draw()
                 self.next_tick = time.monotonic() + self.options.delay
-            elif key in (ord("r"), ord("R")):
-                self.history.clear()
-                self._draw()
             elif key in (ord("h"), ord("H"), ord("?")):
                 draw_help(
                     self.screen, self.options.delay, self.pal, self.options.ascii

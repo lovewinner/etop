@@ -13,8 +13,6 @@ from etop_tui.render import (
     compute_layout,
     format_bytes,
     format_uptime,
-    graph_lines,
-    graph_matrix,
     load_band,
     pipe_parts,
 )
@@ -58,53 +56,6 @@ class ColourBandTests(unittest.TestCase):
         )
 
 
-class GraphTests(unittest.TestCase):
-    def test_dimensions(self):
-        values = [50.0] * 100
-        lines = graph_lines(values, 30, 4)
-        self.assertEqual(len(lines), 4)
-        self.assertTrue(all(len(line) == 30 for line in lines))
-        ascii_lines = graph_lines(values, 30, 4, ascii_mode=True)
-        self.assertEqual(len(ascii_lines), 4)
-        self.assertTrue(all(len(line) == 30 for line in ascii_lines))
-
-    def test_full_and_empty(self):
-        full = graph_lines([100.0] * 20, 10, 2)
-        self.assertTrue(all(ch != " " for line in full for ch in line[:10]))
-        zero = graph_lines([0.0] * 20, 10, 2)
-        self.assertTrue(all(ch != " " for ch in zero[-1]))
-        self.assertTrue(all(ch == " " for row in zero[:-1] for ch in row))
-        self.assertTrue(all(0x2800 <= ord(ch) <= 0x28FF for ch in "".join(full) if ch != " "))
-
-    def test_matrix_keeps_per_column_values(self):
-        matrix = graph_matrix([10.0, 10.0, 70.0, 70.0, 95.0, 95.0], 3, 2)
-        self.assertEqual(len(matrix), 2)
-        self.assertEqual(len(matrix[0]), 3)
-        values = {
-            value
-            for row in matrix
-            for character, value in row
-            if value is not None and character != " "
-        }
-        self.assertEqual(values, {10.0, 70.0, 95.0})
-
-    def test_short_history_stretches_to_full_width(self):
-        matrix = graph_matrix([50.0], 5, 2)
-        values = {
-            value
-            for row in matrix
-            for character, value in row
-            if value is not None and character != " "
-        }
-        self.assertEqual(values, {50.0})
-        self.assertEqual(sum(1 for character, _ in matrix[1] if character != " "), 5)
-
-    def test_history_order_is_preserved(self):
-        matrix = graph_matrix([10.0, 90.0], 4, 2)
-        columns = [value for _, value in matrix[1]]
-        self.assertEqual(columns, [10.0, 10.0, 90.0, 90.0])
-
-
 class FormatTests(unittest.TestCase):
     def test_bytes(self):
         self.assertEqual(format_bytes(None), "n/a")
@@ -142,6 +93,21 @@ class LayoutTests(unittest.TestCase):
             self.assertIn("mem", layout.panels)
             self.assertIn("gpu", layout.panels)
             self.assertIn("vram", layout.panels)
+
+    def test_full_layout_shrinks_details_before_compact(self):
+        self.assertIsNone(compute_layout(14, 80, 1, True))
+        layout = compute_layout(15, 80, 1, True)
+        self.assertIsNotNone(layout)
+        self._check(layout, 15, 80)
+        self.assertEqual(
+            {key: rect.h for key, rect in layout.panels.items()},
+            {"cpu": 3, "mem": 4, "gpu": 3, "vram": 3},
+        )
+        layout = compute_layout(16, 80, 1, True)
+        self.assertEqual(layout.panels["mem"].h, 5)
+        self.assertEqual(layout.panels["vram"].h, 3)
+        layout = compute_layout(17, 80, 1, True)
+        self.assertEqual(layout.panels["vram"].h, 4)
 
     def test_no_gpu(self):
         layout = compute_layout(24, 80, 0, False)
