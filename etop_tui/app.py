@@ -134,7 +134,7 @@ class App:
                     rows,
                     cols,
                     self.pal,
-                    min_rows=max(4, needed + 2),
+                    min_rows=max(5, needed + 2),
                 )
             self.screen.refresh()
         except curses.error:

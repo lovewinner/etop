@@ -325,34 +325,25 @@ def draw_header(
     paused: bool,
     pal: Palette,
 ) -> None:
+    """Two-line header: identity/uptime/clock, then load averages."""
     left = f" etop {__version__}  {hostname}"
-    right = " " + time.strftime("%H:%M:%S") + " "
-    parts = [
-        f"up {format_uptime(uptime)}",
-        f"load {loads[0]:.2f} {loads[1]:.2f} {loads[2]:.2f}",
-    ]
-    if paused:
-        parts.append("PAUSED")
-    space = rect.w - len(left) - len(right) - 1
-    middle_parts = []
-    used = 0
-    for part in parts:
-        addition = len(part) + (2 if middle_parts else 0)
-        if used + addition > space:
-            break
-        middle_parts.append(part)
-        used += addition
+    uptime_text = f"up {format_uptime(uptime)}"
+    clock = " " + time.strftime("%H:%M:%S") + " "
+
     put(win, rect.y, 0, left, pal.attr("title", bold=True))
-    if middle_parts:
-        put(
-            win,
-            rect.y,
-            len(left) + 1,
-            "  ".join(middle_parts),
-            pal.attr("dim"),
-        )
-    if rect.w >= len(right):
-        put(win, rect.y, rect.w - len(right), right, pal.attr("dim"))
+    if rect.w >= len(clock):
+        put(win, rect.y, rect.w - len(clock), clock, pal.attr("dim"))
+    start = len(left) + 1
+    limit = rect.w - len(clock) - 1 if rect.w >= len(clock) else rect.w
+    if start < limit:
+        put(win, rect.y, start, uptime_text[: limit - start], pal.attr("dim"))
+
+    load_text = (
+        f"load {loads[0]:.2f} {loads[1]:.2f} {loads[2]:.2f}"
+    )
+    if paused:
+        load_text += "  PAUSED"
+    put(win, rect.y + 1, 1, load_text[: max(0, rect.w - 1)], pal.attr("dim"))
 
 
 def draw_footer(
@@ -423,17 +414,28 @@ def compact_metrics_for_height(
     gpus: Sequence[GpuSample],
     ascii_mode: bool = False,
 ) -> List[CompactMetric]:
-    """Below 6 rows only CPU and memory fit; hide GPU details."""
-    return compact_metrics(cpu, mem, gpus if rows >= 6 else [], ascii_mode)
+    """Show GPU rows only when the complete set fits below the two header rows."""
+    full = compact_metrics(cpu, mem, gpus, ascii_mode)
+    if len(full) <= rows - 2:
+        return full
+    return compact_metrics(cpu, mem, [], ascii_mode)
 
 
 def compact_layout(
     rows: int, cols: int, count: int
-) -> Optional[Tuple[int, Rect, Rect]]:
-    """Return (first_metric_row, header, footer) for the compact view."""
-    if rows < 4 or cols < 40 or count <= 0 or count > rows - 2:
+) -> Optional[Tuple[int, Rect, Optional[Rect]]]:
+    """Return (first_metric_row, header, footer).
+
+    The footer is dropped when that is the only way to keep every metric row.
+    """
+    if rows < 5 or cols < 44 or count <= 0:
         return None
-    return 1, Rect(0, 0, 1, cols), Rect(rows - 1, 0, 1, cols)
+    header = Rect(0, 0, 2, cols)
+    if count <= rows - 3:
+        return 2, header, Rect(rows - 1, 0, 1, cols)
+    if count <= rows - 2:
+        return 2, header, None
+    return None
 
 
 def draw_compact(
@@ -492,7 +494,8 @@ def draw_compact(
                 pal.attr("dim"),
             )
 
-    draw_footer(win, footer, interval, paused, pal)
+    if footer is not None:
+        draw_footer(win, footer, interval, paused, pal)
     return True
 
 
@@ -526,7 +529,7 @@ def draw_help(win, interval: float, pal: Palette, ascii_mode: bool) -> None:
 
 
 def draw_too_small(
-    win, rows: int, cols: int, pal: Palette, min_rows: int = 4, min_cols: int = 40
+    win, rows: int, cols: int, pal: Palette, min_rows: int = 5, min_cols: int = 44
 ) -> None:
     put(win, 0, 1, "etop", pal.attr("title", bold=True))
     message = f"{cols}x{rows} too small (min {min_cols}x{min_rows})"

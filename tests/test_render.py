@@ -80,33 +80,45 @@ class CompactLayoutTests(unittest.TestCase):
         layout = compact_layout(8, 44, 4)
         self.assertIsNotNone(layout)
         start, header, footer = layout
-        self.assertEqual((start, header.y, footer.y), (1, 0, 7))
+        self.assertEqual((start, header.h, footer.y), (2, 2, 7))
         self.assertLessEqual(start + 4 - 1, footer.y - 1)
 
-    def test_44x8_fits_four_gpus(self):
+    def test_44x9_fits_four_gpus(self):
+        layout = compact_layout(9, 44, 6)
+        self.assertIsNotNone(layout)
+        start, header, footer = layout
+        self.assertEqual((start, header.h, footer.y), (2, 2, 8))
+        self.assertLessEqual(start + 6 - 1, footer.y - 1)
+        self.assertIsNone(compact_layout(9, 44, 7)[2])
+        self.assertIsNone(compact_layout(9, 44, 8))
+
+    def test_44x8_four_gpus_drops_footer(self):
         layout = compact_layout(8, 44, 6)
         self.assertIsNotNone(layout)
         start, header, footer = layout
-        self.assertEqual((start, header.y, footer.y), (1, 0, 7))
-        self.assertLessEqual(start + 6 - 1, footer.y - 1)
-        self.assertIsNone(compact_layout(8, 44, 7))
+        self.assertEqual((start, header.h, footer), (2, 2, None))
+        self.assertEqual(start + 6 - 1, 7)
 
     def test_minimum_and_top_alignment(self):
-        self.assertEqual(compact_layout(4, 40, 2)[0], 1)
-        self.assertEqual(compact_layout(6, 44, 4)[0], 1)
-        self.assertEqual(compact_layout(8, 44, 2)[0], 1)
-        self.assertIsNone(compact_layout(3, 40, 2))
-        self.assertIsNone(compact_layout(5, 44, 4))
-        self.assertIsNone(compact_layout(8, 39, 4))
+        self.assertEqual(compact_layout(5, 44, 2)[0], 2)
+        self.assertEqual(compact_layout(7, 44, 4)[0], 2)
+        self.assertEqual(compact_layout(8, 44, 2)[0], 2)
+        self.assertIsNone(compact_layout(4, 44, 2))
+        self.assertIsNone(compact_layout(5, 43, 2))
+        self.assertIsNotNone(compact_layout(6, 44, 4))
 
-    def test_40x4_hides_gpu(self):
+    def test_44x6_shows_all_metrics_without_footer(self):
+        self.assertIsNotNone(compact_layout(6, 44, 4))
+        self.assertIsNone(compact_layout(6, 44, 4)[2])
+
+    def test_44x5_hides_gpu(self):
         cpu = CpuSample(10.0, ())
         mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
         gpu = GpuSample("nvidia", 0, "RTX", 10.0, 2 * GIB, 24 * GIB, 54.0)
         self.assertEqual(
             [
                 metric.label
-                for metric in compact_metrics_for_height(4, cpu, mem, [gpu])
+                for metric in compact_metrics_for_height(5, cpu, mem, [gpu])
             ],
             ["CPU", "MEM"],
         )
@@ -117,15 +129,25 @@ class CompactLayoutTests(unittest.TestCase):
             ],
             ["CPU", "MEM", "GPU", "VRAM"],
         )
+        self.assertEqual(
+            [
+                metric.label
+                for metric in compact_metrics_for_height(7, cpu, mem, [gpu])
+            ],
+            ["CPU", "MEM", "GPU", "VRAM"],
+        )
 
     def test_rows_do_not_overlap_footer(self):
-        for rows in range(4, 20):
-            for count in (2, 3, 4):
+        for rows in range(5, 20):
+            for count in (2, 3, 4, 6):
                 layout = compact_layout(rows, 44, count)
                 if layout is None:
                     continue
                 start, _, footer = layout
-                self.assertLessEqual(start + count - 1, footer.y - 1)
+                if footer is None:
+                    self.assertEqual(start + count - 1, rows - 1)
+                else:
+                    self.assertLessEqual(start + count - 1, footer.y - 1)
 
     def test_metrics(self):
         cpu = CpuSample(42.0, (10.0, 20.0))
