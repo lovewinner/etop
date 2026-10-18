@@ -78,9 +78,8 @@ class Palette:
             pass
         backgrounds.append(curses.COLOR_BLACK)
         if curses.COLORS >= 256:
-            # Vivid xterm-256 colours; basic 8-colour themes sometimes map
-            # green/yellow/red to very similar shades.
-            good, warn, bad = 46, 226, 196
+            # Muted xterm-256 shades; pure 46/226/196 are harsh on the eyes.
+            good, warn, bad = 71, 179, 167
         else:
             good, warn, bad = (
                 curses.COLOR_GREEN,
