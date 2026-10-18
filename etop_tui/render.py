@@ -917,11 +917,22 @@ def compact_metrics(
     return rows
 
 
+def compact_metrics_for_height(
+    rows: int,
+    cpu: CpuSample,
+    mem: MemSample,
+    gpus: Sequence[GpuSample],
+    ascii_mode: bool = False,
+) -> List[CompactMetric]:
+    """Below 6 rows only CPU and memory fit; hide GPU details."""
+    return compact_metrics(cpu, mem, gpus if rows >= 6 else [], ascii_mode)
+
+
 def compact_layout(
     rows: int, cols: int, count: int
 ) -> Optional[Tuple[int, Rect, Rect]]:
     """Return (first_metric_row, header, footer) for the compact view."""
-    if rows < 6 or cols < 40 or count <= 0 or count > rows - 2:
+    if rows < 4 or cols < 40 or count <= 0 or count > rows - 2:
         return None
     return 1, Rect(0, 0, 1, cols), Rect(rows - 1, 0, 1, cols)
 
@@ -941,8 +952,10 @@ def draw_compact(
     interval: float,
     paused: bool,
 ) -> bool:
-    """Draw the four metrics without boxes, one row per metric."""
-    metrics = compact_metrics(cpu, mem, gpus, ascii_mode)
+    """Draw the metrics without boxes, one row per metric."""
+    metrics = compact_metrics_for_height(
+        rows, cpu, mem, gpus, ascii_mode
+    )
     layout = compact_layout(rows, cols, len(metrics))
     if layout is None:
         return False
@@ -1007,7 +1020,7 @@ def draw_help(win, interval: float, pal: Palette, ascii_mode: bool) -> None:
 
 
 def draw_too_small(
-    win, rows: int, cols: int, pal: Palette, min_rows: int = 6, min_cols: int = 40
+    win, rows: int, cols: int, pal: Palette, min_rows: int = 4, min_cols: int = 40
 ) -> None:
     put(win, 0, 1, "etop", pal.attr("title", bold=True))
     message = f"{cols}x{rows} too small (min {min_cols}x{min_rows})"

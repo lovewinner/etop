@@ -9,6 +9,7 @@ from etop_tui.render import (
     compact_bytes,
     compact_layout,
     compact_metrics,
+    compact_metrics_for_height,
     compute_layout,
     format_bytes,
     format_uptime,
@@ -189,13 +190,34 @@ class CompactLayoutTests(unittest.TestCase):
         self.assertIsNone(compact_layout(8, 44, 7))
 
     def test_minimum_and_top_alignment(self):
+        self.assertEqual(compact_layout(4, 40, 2)[0], 1)
         self.assertEqual(compact_layout(6, 44, 4)[0], 1)
         self.assertEqual(compact_layout(8, 44, 2)[0], 1)
+        self.assertIsNone(compact_layout(3, 40, 2))
         self.assertIsNone(compact_layout(5, 44, 4))
         self.assertIsNone(compact_layout(8, 39, 4))
 
+    def test_40x4_hides_gpu(self):
+        cpu = CpuSample(10.0, ())
+        mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
+        gpu = GpuSample("nvidia", 0, "RTX", 10.0, 2 * GIB, 24 * GIB, 54.0)
+        self.assertEqual(
+            [
+                metric.label
+                for metric in compact_metrics_for_height(4, cpu, mem, [gpu])
+            ],
+            ["CPU", "MEM"],
+        )
+        self.assertEqual(
+            [
+                metric.label
+                for metric in compact_metrics_for_height(6, cpu, mem, [gpu])
+            ],
+            ["CPU", "MEM", "GPU", "VRAM"],
+        )
+
     def test_rows_do_not_overlap_footer(self):
-        for rows in range(6, 20):
+        for rows in range(4, 20):
             for count in (2, 3, 4):
                 layout = compact_layout(rows, 44, count)
                 if layout is None:

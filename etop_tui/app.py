@@ -29,7 +29,7 @@ from .render import (
     draw_mem,
     draw_too_small,
     draw_vram,
-    compact_metrics,
+    compact_metrics_for_height,
     format_bytes,
     format_uptime,
     load_band,
@@ -144,7 +144,8 @@ class App:
                     self.paused,
                 ):
                     needed = len(
-                        compact_metrics(
+                        compact_metrics_for_height(
+                            rows,
                             self.cpu_sample,
                             self.mem_sample,
                             self.gpus,
@@ -156,7 +157,7 @@ class App:
                         rows,
                         cols,
                         self.pal,
-                        min_rows=max(6, needed + 2),
+                        min_rows=max(4, needed + 2),
                     )
             else:
                 draw_header(
