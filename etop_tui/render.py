@@ -103,7 +103,6 @@ class Palette:
             return
         if not self.color:
             return
-        backgrounds = [-1, curses.COLOR_BLACK]
         if curses.COLORS >= 256:
             # Desaturated xterm-256 shades: sage / straw / sand / dusty red.
             good, warn, orange, bad = 108, 186, 180, 174
@@ -126,13 +125,13 @@ class Palette:
             "accent": curses.COLOR_MAGENTA,
         }
         for index, (name, foreground) in enumerate(colours.items(), start=1):
-            for background in backgrounds:
-                try:
-                    curses.init_pair(index, foreground, background)
-                except curses.error:
-                    continue
-                self._pairs[name] = index
-                break
+            try:
+                # -1 keeps the terminal's default background (transparent on
+                # terminals/themes that support it). Never force black.
+                curses.init_pair(index, foreground, -1)
+            except curses.error:
+                continue
+            self._pairs[name] = index
         # If no pair could be initialised, fall back to monochrome attributes.
         self.color = bool(self._pairs)
 
@@ -153,9 +152,9 @@ class Palette:
         if not self.color or band not in self._pairs:
             # Monochrome fallback so the four bands remain distinguishable.
             if band == "bad":
-                return curses.A_BOLD | curses.A_REVERSE
-            if band == "orange":
                 return curses.A_BOLD | curses.A_UNDERLINE
+            if band == "orange":
+                return curses.A_UNDERLINE
             if band == "warn":
                 return curses.A_BOLD
             return curses.A_NORMAL
