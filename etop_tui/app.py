@@ -130,6 +130,7 @@ class App:
                     self.cpu_sample,
                     self.mem_sample,
                     self.gpus,
+                    self.history,
                     self.pal,
                     self.options.ascii,
                     self.hostname,

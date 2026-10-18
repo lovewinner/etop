@@ -128,7 +128,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
  q quit  p pause  +/-  r reset  h help
 ```
 
-低于 **40x6** 时显示提示。精简布局用进度条代替历史曲线以节省行数。
+行数富余时会自动在指标下方补一行或多行历史曲线（例如 44x8 且无多卡时，CPU/MEM 会有曲线行），不再上下留白；上面的示例省略了这些曲线行。低于 **40x6** 时显示提示。
 
 ## 测试
 
