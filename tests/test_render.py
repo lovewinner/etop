@@ -1,8 +1,14 @@
 import math
 import unittest
 
+from etop_tui.collect import CpuSample, MemSample
+from etop_tui.gpu import GpuSample
 from etop_tui.render import (
+    GIB,
     Rect,
+    compact_bytes,
+    compact_layout,
+    compact_metrics,
     compute_layout,
     format_bytes,
     format_uptime,
@@ -136,6 +142,74 @@ class LayoutTests(unittest.TestCase):
     def test_rect_inner(self):
         inner = Rect(1, 2, 5, 10).inner()
         self.assertEqual((inner.y, inner.x, inner.h, inner.w), (2, 3, 3, 8))
+
+
+class CompactLayoutTests(unittest.TestCase):
+    def test_44x8_fits_four_metrics(self):
+        layout = compact_layout(8, 44, 4)
+        self.assertIsNotNone(layout)
+        start, header, footer = layout
+        self.assertEqual((start, header.y, footer.y), (2, 0, 7))
+        self.assertLessEqual(start + 4 - 1, footer.y - 1)
+
+    def test_minimum_and_centering(self):
+        self.assertEqual(compact_layout(6, 44, 4)[0], 1)
+        self.assertEqual(compact_layout(8, 44, 2)[0], 3)
+        self.assertIsNone(compact_layout(5, 44, 4))
+        self.assertIsNone(compact_layout(8, 39, 4))
+
+    def test_rows_do_not_overlap_footer(self):
+        for rows in range(6, 20):
+            for count in (2, 3, 4):
+                layout = compact_layout(rows, 44, count)
+                if layout is None:
+                    continue
+                start, _, footer = layout
+                self.assertLessEqual(start + count - 1, footer.y - 1)
+
+    def test_metrics(self):
+        cpu = CpuSample(42.0, (10.0, 20.0))
+        mem = MemSample(
+            total=16 * GIB,
+            free=1,
+            available=8 * GIB,
+            buffers=0,
+            cached=0,
+            swap_total=0,
+            swap_free=0,
+        )
+        gpu = GpuSample("nvidia", 0, "RTX", 21.0, 2 * GIB, 24 * GIB, 54.0)
+        metrics = compact_metrics(cpu, mem, [gpu], ascii_mode=False)
+        self.assertEqual(
+            [metric.label for metric in metrics], ["CPU", "MEM", "GPU", "VRAM"]
+        )
+        self.assertAlmostEqual(metrics[0].pct, 42.0)
+        self.assertEqual(metrics[1].detail, "8.0/16.0G")
+        self.assertEqual(metrics[2].detail, "54°C")
+        self.assertAlmostEqual(metrics[3].pct, 2 / 24 * 100)
+        self.assertEqual(metrics[3].detail, "2.0/24.0G")
+
+    def test_metrics_without_gpu(self):
+        cpu = CpuSample(10.0, ())
+        mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
+        self.assertEqual(
+            [metric.label for metric in compact_metrics(cpu, mem, [])],
+            ["CPU", "MEM"],
+        )
+
+    def test_gpu_without_vram(self):
+        cpu = CpuSample(10.0, ())
+        mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
+        gpu = GpuSample("nvidia", 0, "RTX", 10.0, None, None, None)
+        self.assertEqual(
+            [metric.label for metric in compact_metrics(cpu, mem, [gpu])],
+            ["CPU", "MEM", "GPU"],
+        )
+
+    def test_compact_bytes(self):
+        self.assertEqual(compact_bytes(None, 2 * GIB), "")
+        self.assertEqual(compact_bytes(512 * 1024 ** 2, 2 * GIB), "0.5/2.0G")
+        self.assertEqual(compact_bytes(256 * 1024 ** 2, 512 * 1024 ** 2), "256/512M")
 
 
 if __name__ == "__main__":

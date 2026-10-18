@@ -19,6 +19,7 @@ from .gpu import DemoBackend, GpuMonitor, GpuSample, detect_backends
 from .render import (
     Palette,
     compute_layout,
+    draw_compact,
     draw_cpu,
     draw_footer,
     draw_gpu,
@@ -119,12 +120,23 @@ class App:
             self.screen.erase()
             has_vram = any(gpu.mem_total for gpu in self.gpus)
             layout = compute_layout(rows, cols, len(self.gpus), has_vram)
-            if layout is None and self.gpus:
-                # Not enough room for four panels: keep CPU and memory.
-                layout = compute_layout(rows, cols, 0, False)
             if layout is None:
-                minimum = 2 + 3 + 4 + (4 if self.gpus else 0) + (3 if has_vram else 0)
-                draw_too_small(self.screen, rows, cols, self.pal, minimum)
+                if not draw_compact(
+                    self.screen,
+                    rows,
+                    cols,
+                    self.cpu_sample,
+                    self.mem_sample,
+                    self.gpus,
+                    self.pal,
+                    self.options.ascii,
+                    self.hostname,
+                    self.uptime,
+                    self.loads,
+                    self.options.delay,
+                    self.paused,
+                ):
+                    draw_too_small(self.screen, rows, cols, self.pal)
             else:
                 draw_header(
                     self.screen,

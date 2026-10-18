@@ -704,13 +704,124 @@ def draw_header(
 def draw_footer(
     win, rect: Rect, interval: float, paused: bool, pal: Palette
 ) -> None:
-    text = (
-        f" q quit   p pause   +/- interval   r reset   h help"
-        f"     {interval:.2f}s"
-    )
+    if rect.w < 62:
+        text = " q quit  p pause  +/-  r reset  h help"
+    else:
+        text = (
+            f" q quit   p pause   +/- interval   r reset   h help"
+            f"     {interval:.2f}s"
+        )
     if paused:
         text += "   PAUSED"
     put(win, rect.y, 1, text, pal.attr("dim"))
+
+
+@dataclass(frozen=True)
+class CompactMetric:
+    label: str
+    pct: Optional[float]
+    detail: str = ""
+
+
+def compact_bytes(used: Optional[int], total: Optional[int]) -> str:
+    """Short byte pair for the compact rows, e.g. '9.4/15.6G'."""
+    if used is None or not total:
+        return ""
+    if total >= GIB:
+        return f"{used / GIB:.1f}/{total / GIB:.1f}G"
+    return f"{used / MIB:.0f}/{total / MIB:.0f}M"
+
+
+def compact_metrics(
+    cpu: CpuSample,
+    mem: MemSample,
+    gpus: Sequence[GpuSample],
+    ascii_mode: bool = False,
+) -> List[CompactMetric]:
+    """One row of data per metric, for terminals with very few rows."""
+    rows = [
+        CompactMetric("CPU", cpu.total),
+        CompactMetric("MEM", mem.used_pct, compact_bytes(mem.used, mem.total)),
+    ]
+    if gpus:
+        primary = gpus[0]
+        detail = _temp_text(primary.temp, ascii_mode)
+        if primary.stale:
+            detail = f"{detail} *".strip()
+        if len(gpus) > 1:
+            detail = f"{detail} +{len(gpus) - 1}".strip()
+        rows.append(CompactMetric("GPU", primary.util, detail))
+    with_memory = [gpu for gpu in gpus if gpu.mem_total]
+    if with_memory:
+        primary = with_memory[0]
+        detail = compact_bytes(primary.mem_used, primary.mem_total)
+        if len(with_memory) > 1:
+            detail = f"{detail} +{len(with_memory) - 1}".strip()
+        rows.append(CompactMetric("VRAM", primary.mem_pct, detail))
+    return rows
+
+
+def compact_layout(
+    rows: int, cols: int, count: int
+) -> Optional[Tuple[int, Rect, Rect]]:
+    """Return (first_metric_row, header, footer) for the compact view."""
+    if rows < 6 or cols < 40 or count <= 0 or count > rows - 2:
+        return None
+    start = 1 + max(0, (rows - 2 - count) // 2)
+    return start, Rect(0, 0, 1, cols), Rect(rows - 1, 0, 1, cols)
+
+
+def draw_compact(
+    win,
+    rows: int,
+    cols: int,
+    cpu: CpuSample,
+    mem: MemSample,
+    gpus: Sequence[GpuSample],
+    pal: Palette,
+    ascii_mode: bool,
+    hostname: str,
+    uptime: float,
+    loads: Sequence[float],
+    interval: float,
+    paused: bool,
+) -> bool:
+    """Draw the four metrics without boxes or graphs, one line each."""
+    metrics = compact_metrics(cpu, mem, gpus, ascii_mode)
+    layout = compact_layout(rows, cols, len(metrics))
+    if layout is None:
+        return False
+    start, header, footer = layout
+    draw_header(win, header, hostname, uptime, loads, interval, paused, pal)
+
+    label_width = 5
+    meter_x = 1 + label_width + 1
+    right_edge = cols - 1
+    for offset, metric in enumerate(metrics):
+        y = start + offset
+        put(win, y, 1, f"{metric.label:<{label_width}}", pal.attr("dim"))
+
+        detail = metric.detail
+        max_detail = max(0, cols // 3)
+        if len(detail) > max_detail:
+            detail = detail[:max_detail]
+        detail_start = right_edge - len(detail) if detail else right_edge
+        meter_width = detail_start - 1 - meter_x if detail else right_edge - meter_x
+        if meter_width < 10 and detail:
+            detail = ""
+            detail_start = right_edge
+            meter_width = right_edge - meter_x
+
+        if meter_width < 8:
+            text = "n/a" if metric.pct is None else f"{metric.pct:5.1f}%"
+            put(win, y, meter_x, text, pal.attr("normal"))
+            continue
+        draw_meter(win, y, meter_x, meter_width, metric.pct, pal, ascii_mode)
+        if detail:
+            put(win, y, detail_start, detail, pal.attr("dim"))
+
+    draw_footer(win, footer, interval, paused, pal)
+    return True
 
 
 def draw_help(win, interval: float, pal: Palette, ascii_mode: bool) -> None:
@@ -744,8 +855,8 @@ def draw_help(win, interval: float, pal: Palette, ascii_mode: bool) -> None:
 
 
 def draw_too_small(
-    win, rows: int, cols: int, pal: Palette, min_rows: int = 10
+    win, rows: int, cols: int, pal: Palette, min_rows: int = 6, min_cols: int = 40
 ) -> None:
     put(win, 0, 1, "etop", pal.attr("title", bold=True))
-    message = f"terminal too small ({cols}x{rows}, need at least 44x{min_rows})"
+    message = f"{cols}x{rows} too small (min {min_cols}x{min_rows})"
     put(win, 1, 1, message, pal.attr("normal"))

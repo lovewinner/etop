@@ -89,8 +89,20 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 
 ## 终端尺寸
 
-最小约 **44x16**（含 GPU 四面板）；空间不足时会优先只保留 CPU 和内存面板。
-低于 44x10 时显示提示。
+- **完整布局**：约 **44x16** 起，四个面板带边框和历史曲线。
+- **精简布局**：空间不足时自动切换为“每项指标一行”（标签 + 进度条 + 百分比 + 关键数值），
+  最小 **40x6**。因此在 **44x8** 下仍能同时显示 CPU、内存、GPU、显存四项：
+
+```text
+ etop 0.1.0  host  up 2h            14:03
+ CPU   ██████▍                      12.4%
+ MEM   ███████████▋        61.5%  9.6/15.6G
+ GPU   ██████████████████▉  78.9%  52°C
+ VRAM  ████████████████▉    93.4%  14.9/16.0G
+ q quit  p pause  +/-  r reset  h help
+```
+
+低于 **40x6** 时显示提示。精简布局用进度条代替历史曲线以节省行数。
 
 ## 测试
 
@@ -98,4 +110,4 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 python3 -m unittest discover -s tests -v
 ```
 
-测试覆盖 `/proc` 解析、NVIDIA CSV 解析、sysfs GPU 采样、历史曲线、面板布局与格式化。
+测试覆盖 `/proc` 解析、NVIDIA CSV 解析、sysfs GPU 采样、历史曲线、完整/精简布局与格式化。
