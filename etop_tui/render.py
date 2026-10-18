@@ -45,6 +45,15 @@ def format_bytes(value: Optional[int]) -> str:
     return f"{value} B"
 
 
+def compact_bytes(used: Optional[int], total: Optional[int]) -> str:
+    """Short byte pair for text-first views, e.g. '9.4/15.6G'."""
+    if used is None or not total:
+        return ""
+    if total >= GIB:
+        return f"{used / GIB:.1f}/{total / GIB:.1f}G"
+    return f"{used / MIB:.0f}/{total / MIB:.0f}M"
+
+
 def format_uptime(seconds: float) -> str:
     total = int(seconds)
     days, rem = divmod(total, 86400)
@@ -177,14 +186,20 @@ def compute_layout(
     if rows < 10 or cols < 44:
         return None
 
+    multi = gpu_count > 1
+    gpu_height = gpu_count + 2 if multi else 4
     heights = {"cpu": 4, "mem": 5}
     if gpu_count:
-        heights["gpu"] = 4
-    if has_vram:
+        heights["gpu"] = gpu_height
+    if has_vram and not multi:
         heights["vram"] = 4
 
     available = rows - 2  # header + footer
-    minimum = {"cpu": 3, "mem": 4, "gpu": 4, "vram": 3}
+    minimum = {"cpu": 3, "mem": 4}
+    if gpu_count:
+        minimum["gpu"] = gpu_height if multi else 4
+    if "vram" in heights:
+        minimum["vram"] = 3
     while sum(heights.values()) > available:
         shrinkable = [key for key in heights if heights[key] > minimum[key]]
         if not shrinkable:
@@ -195,7 +210,7 @@ def compute_layout(
     caps = {
         "cpu": 2 + 20 + 1,
         "mem": 2 + 20 + 3,
-        "gpu": 2 + 14 + 2,
+        "gpu": gpu_height if multi else 2 + 14 + 2,
         "vram": 2 + 12 + 2,
     }
     while sum(heights.values()) < available:
@@ -569,7 +584,7 @@ def draw_gpu(
             put(win, inner.y + row, inner.x, f"{gpu.index}", pal.attr("dim"))
         return
 
-    info_rows = 2 if inner.h >= 3 else 1 if inner.h >= 1 else 0
+    info_rows = 1 if inner.h >= 1 else 0
     graph_h = max(0, inner.h - info_rows)
     if graph_h:
         draw_graph(
@@ -585,12 +600,9 @@ def draw_gpu(
         temperature = _temp_text(primary.temp, ascii_mode)
         if temperature:
             suffix += "   " + temperature
-        draw_meter(win, y, inner.x, inner.w, util, pal, ascii_mode, suffix=suffix)
-    if info_rows >= 2:
-        name = primary.name
         if primary.stale:
-            name += "  [stale]"
-        put(win, y + 1, inner.x, name, pal.attr("dim"))
+            suffix += "  [stale]"
+        draw_meter(win, y, inner.x, inner.w, util, pal, ascii_mode, suffix=suffix)
 
 
 def draw_vram(
@@ -661,6 +673,74 @@ def draw_vram(
         put(win, y + 1, inner.x, detail, pal.attr("dim"))
 
 
+def draw_gpu_list(
+    win,
+    rect: Rect,
+    gpus: Sequence[GpuSample],
+    pal: Palette,
+    ascii_mode: bool,
+) -> None:
+    """Text-only view for multi-GPU systems: one line per GPU."""
+    if not gpus:
+        return
+    has_vram = any(gpu.mem_total for gpu in gpus)
+    title = "GPU / VRAM" if has_vram else "GPU"
+    draw_panel(
+        win,
+        rect,
+        title,
+        f"{len(gpus)} GPUs",
+        pal,
+        ascii_mode,
+    )
+    inner = rect.inner()
+    if inner.h <= 0 or inner.w <= 0:
+        return
+
+    label_width = max(len(f"GPU{gpu.index}") for gpu in gpus) + 1
+    visible = min(len(gpus), inner.h)
+    truncated = len(gpus) > visible
+    if truncated and visible > 1:
+        visible -= 1
+
+    for row, gpu in enumerate(gpus[:visible]):
+        y = inner.y + row
+        put(win, y, inner.x, f"GPU{gpu.index}", pal.attr("dim"))
+        util_x = inner.x + label_width
+        if gpu.util is None:
+            util_text = "   n/a"
+            util_attr = pal.attr("dim")
+        else:
+            util_text = f"{gpu.util:5.1f}%"
+            util_attr = pal.level_attr(gpu.util)
+        put(win, y, util_x, util_text, util_attr)
+
+        x = util_x + 7
+        mem_text = compact_bytes(gpu.mem_used, gpu.mem_total)
+        if mem_text and gpu.mem_pct is not None:
+            mem_text = f"{mem_text} {gpu.mem_pct:.0f}%"
+        if mem_text:
+            put(win, y, x, mem_text, pal.attr("dim"))
+            x += len(mem_text) + 1
+        temperature = _temp_text(gpu.temp, ascii_mode)
+        if temperature:
+            put(win, y, x, temperature, pal.attr("dim"))
+            x += len(temperature) + 1
+        if gpu.stale:
+            put(win, y, x, "*", pal.attr("dim"))
+
+    if truncated:
+        hidden = len(gpus) - visible
+        if hidden > 0 and inner.y + visible < inner.y + inner.h:
+            put(
+                win,
+                inner.y + visible,
+                inner.x,
+                f"+{hidden} more GPUs",
+                pal.attr("dim"),
+            )
+
+
 def draw_header(
     win,
     rect: Rect,
@@ -721,15 +801,7 @@ class CompactMetric:
     label: str
     pct: Optional[float]
     detail: str = ""
-
-
-def compact_bytes(used: Optional[int], total: Optional[int]) -> str:
-    """Short byte pair for the compact rows, e.g. '9.4/15.6G'."""
-    if used is None or not total:
-        return ""
-    if total >= GIB:
-        return f"{used / GIB:.1f}/{total / GIB:.1f}G"
-    return f"{used / MIB:.0f}/{total / MIB:.0f}M"
+    bar: bool = True
 
 
 def compact_metrics(
@@ -743,6 +815,29 @@ def compact_metrics(
         CompactMetric("CPU", cpu.total),
         CompactMetric("MEM", mem.used_pct, compact_bytes(mem.used, mem.total)),
     ]
+    if len(gpus) > 1:
+        # Multi-GPU: one text line per card, utilisation and VRAM together.
+        for gpu in gpus:
+            parts = []
+            mem_text = compact_bytes(gpu.mem_used, gpu.mem_total)
+            if mem_text and gpu.mem_pct is not None:
+                mem_text = f"{mem_text} {gpu.mem_pct:.0f}%"
+            if mem_text:
+                parts.append(mem_text)
+            temperature = _temp_text(gpu.temp, ascii_mode)
+            if temperature:
+                parts.append(temperature)
+            if gpu.stale:
+                parts.append("*")
+            rows.append(
+                CompactMetric(
+                    f"GPU{gpu.index}",
+                    gpu.util,
+                    " ".join(parts),
+                    bar=False,
+                )
+            )
+        return rows
     if gpus:
         primary = gpus[0]
         detail = _temp_text(primary.temp, ascii_mode)
@@ -794,12 +889,22 @@ def draw_compact(
     start, header, footer = layout
     draw_header(win, header, hostname, uptime, loads, interval, paused, pal)
 
-    label_width = 5
-    meter_x = 1 + label_width + 1
+    label_width = max(5, max(len(metric.label) for metric in metrics) + 1)
+    meter_x = 1 + label_width
     right_edge = cols - 1
     for offset, metric in enumerate(metrics):
         y = start + offset
         put(win, y, 1, f"{metric.label:<{label_width}}", pal.attr("dim"))
+
+        if not metric.bar:
+            util_text = "   n/a" if metric.pct is None else f"{metric.pct:5.1f}%"
+            util_attr = (
+                pal.attr("dim") if metric.pct is None else pal.level_attr(metric.pct)
+            )
+            put(win, y, meter_x, util_text, util_attr)
+            if metric.detail:
+                put(win, y, meter_x + 7, metric.detail, pal.attr("dim"))
+            continue
 
         detail = metric.detail
         max_detail = max(0, cols // 3)

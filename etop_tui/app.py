@@ -23,11 +23,13 @@ from .render import (
     draw_cpu,
     draw_footer,
     draw_gpu,
+    draw_gpu_list,
     draw_header,
     draw_help,
     draw_mem,
     draw_too_small,
     draw_vram,
+    compact_metrics,
     format_bytes,
     format_uptime,
     load_band,
@@ -136,7 +138,21 @@ class App:
                     self.options.delay,
                     self.paused,
                 ):
-                    draw_too_small(self.screen, rows, cols, self.pal)
+                    needed = len(
+                        compact_metrics(
+                            self.cpu_sample,
+                            self.mem_sample,
+                            self.gpus,
+                            self.options.ascii,
+                        )
+                    )
+                    draw_too_small(
+                        self.screen,
+                        rows,
+                        cols,
+                        self.pal,
+                        min_rows=max(6, needed + 2),
+                    )
             else:
                 draw_header(
                     self.screen,
@@ -165,14 +181,23 @@ class App:
                     self.options.ascii,
                 )
                 if "gpu" in layout.panels:
-                    draw_gpu(
-                        self.screen,
-                        layout.panels["gpu"],
-                        self.gpus,
-                        self.history,
-                        self.pal,
-                        self.options.ascii,
-                    )
+                    if len(self.gpus) > 1:
+                        draw_gpu_list(
+                            self.screen,
+                            layout.panels["gpu"],
+                            self.gpus,
+                            self.pal,
+                            self.options.ascii,
+                        )
+                    else:
+                        draw_gpu(
+                            self.screen,
+                            layout.panels["gpu"],
+                            self.gpus,
+                            self.history,
+                            self.pal,
+                            self.options.ascii,
+                        )
                 if "vram" in layout.panels:
                     draw_vram(
                         self.screen,
@@ -307,7 +332,7 @@ def print_once(options: Options) -> None:
         f"{format_bytes(mem.used)} / {format_bytes(mem.total)}",
     )
     for gpu in gpus:
-        details = [gpu.name]
+        details = []
         if gpu.temp is not None:
             details.append(f"{gpu.temp:.0f}{'C' if ascii_mode else '°C'}")
         if gpu.stale:

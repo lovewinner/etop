@@ -134,6 +134,26 @@ class LayoutTests(unittest.TestCase):
         self.assertNotIn("gpu", layout.panels)
         self.assertNotIn("vram", layout.panels)
 
+    def test_multi_gpu_text_layout(self):
+        layout = compute_layout(24, 80, 4, True)
+        self.assertIsNotNone(layout)
+        self._check(layout, 24, 80)
+        self.assertIn("gpu", layout.panels)
+        self.assertNotIn("vram", layout.panels)
+        self.assertEqual(layout.panels["gpu"].h, 6)
+
+        layout = compute_layout(16, 44, 4, True)
+        self.assertIsNotNone(layout)
+        self._check(layout, 16, 44)
+        self.assertEqual(layout.panels["gpu"].h, 6)
+
+        layout = compute_layout(24, 80, 12, True)
+        self.assertIsNotNone(layout)
+        self._check(layout, 24, 80)
+        self.assertEqual(layout.panels["gpu"].h, 14)
+
+        self.assertIsNone(compute_layout(24, 80, 16, True))
+
     def test_too_small(self):
         self.assertIsNone(compute_layout(9, 80, 0, False))
         self.assertIsNone(compute_layout(24, 40, 0, False))
@@ -151,6 +171,14 @@ class CompactLayoutTests(unittest.TestCase):
         start, header, footer = layout
         self.assertEqual((start, header.y, footer.y), (2, 0, 7))
         self.assertLessEqual(start + 4 - 1, footer.y - 1)
+
+    def test_44x8_fits_four_gpus(self):
+        layout = compact_layout(8, 44, 6)
+        self.assertIsNotNone(layout)
+        start, header, footer = layout
+        self.assertEqual((start, header.y, footer.y), (1, 0, 7))
+        self.assertLessEqual(start + 6 - 1, footer.y - 1)
+        self.assertIsNone(compact_layout(8, 44, 7))
 
     def test_minimum_and_centering(self):
         self.assertEqual(compact_layout(6, 44, 4)[0], 1)
@@ -188,6 +216,26 @@ class CompactLayoutTests(unittest.TestCase):
         self.assertEqual(metrics[2].detail, "54°C")
         self.assertAlmostEqual(metrics[3].pct, 2 / 24 * 100)
         self.assertEqual(metrics[3].detail, "2.0/24.0G")
+
+    def test_multi_gpu_metrics_are_text_rows(self):
+        cpu = CpuSample(10.0, ())
+        mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
+        gpus = [
+            GpuSample("nvidia", 0, "RTX 4090", 42.0, 2 * GIB, 24 * GIB, 54.0),
+            GpuSample("nvidia", 1, "RTX 4090", 87.0, 19 * GIB, 24 * GIB, 61.0),
+        ]
+        metrics = compact_metrics(cpu, mem, gpus, ascii_mode=False)
+        self.assertEqual(
+            [metric.label for metric in metrics],
+            ["CPU", "MEM", "GPU0", "GPU1"],
+        )
+        self.assertTrue(metrics[0].bar)
+        self.assertTrue(metrics[1].bar)
+        self.assertFalse(metrics[2].bar)
+        self.assertFalse(metrics[3].bar)
+        self.assertIn("2.0/24.0G", metrics[2].detail)
+        self.assertIn("54°C", metrics[2].detail)
+        self.assertNotIn("RTX 4090", metrics[2].detail)
 
     def test_metrics_without_gpu(self):
         cpu = CpuSample(10.0, ())
