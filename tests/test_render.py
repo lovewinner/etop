@@ -212,12 +212,13 @@ class CompactLayoutTests(unittest.TestCase):
             [metric.label for metric in metrics], ["CPU", "MEM", "GPU", "VRAM"]
         )
         self.assertAlmostEqual(metrics[0].pct, 42.0)
-        self.assertEqual(metrics[1].detail, "8.0/16.0G")
+        self.assertEqual(metrics[0].detail, " 42.0%")
+        self.assertEqual(metrics[1].detail, " 50.0% 8.0/16G")
         self.assertEqual(metrics[2].detail, "54°C")
         self.assertAlmostEqual(metrics[3].pct, 2 / 24 * 100)
-        self.assertEqual(metrics[3].detail, "2.0/24.0G")
+        self.assertEqual(metrics[3].detail, "  8.3% 2.0/24G")
 
-    def test_multi_gpu_metrics_are_text_rows(self):
+    def test_multi_gpu_metrics_have_bars_and_aligned_text(self):
         cpu = CpuSample(10.0, ())
         mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
         gpus = [
@@ -229,13 +230,12 @@ class CompactLayoutTests(unittest.TestCase):
             [metric.label for metric in metrics],
             ["CPU", "MEM", "GPU0", "GPU1"],
         )
-        self.assertTrue(metrics[0].bar)
-        self.assertTrue(metrics[1].bar)
-        self.assertFalse(metrics[2].bar)
-        self.assertFalse(metrics[3].bar)
-        self.assertIn("2.0/24.0G", metrics[2].detail)
+        self.assertIn("2.0/24G", metrics[2].detail)
         self.assertIn("54°C", metrics[2].detail)
         self.assertNotIn("RTX 4090", metrics[2].detail)
+        self.assertNotIn("42.0%", metrics[2].detail)
+        self.assertNotIn("87.0%", metrics[3].detail)
+        self.assertEqual(len(metrics[2].detail), len(metrics[3].detail))
 
     def test_metrics_without_gpu(self):
         cpu = CpuSample(10.0, ())
@@ -256,8 +256,11 @@ class CompactLayoutTests(unittest.TestCase):
 
     def test_compact_bytes(self):
         self.assertEqual(compact_bytes(None, 2 * GIB), "")
-        self.assertEqual(compact_bytes(512 * 1024 ** 2, 2 * GIB), "0.5/2.0G")
+        self.assertEqual(compact_bytes(512 * 1024 ** 2, 2 * GIB), "0.5/2G")
         self.assertEqual(compact_bytes(256 * 1024 ** 2, 512 * 1024 ** 2), "256/512M")
+        self.assertEqual(
+            compact_bytes(int(76.6 * GIB), int(503.5 * GIB)), "77/504G"
+        )
 
 
 if __name__ == "__main__":
