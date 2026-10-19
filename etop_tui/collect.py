@@ -46,8 +46,8 @@ class CpuTimes:
 class CpuSample:
     total: float
     cores: Tuple[float, ...]
-    # Breakdown of busy time as percentages of the same interval. The values
-    # sum to approximately `total`; idle and iowait are intentionally left
+    # Breakdown of busy time as percentages of the same interval. The
+    # values sum exactly to total; idle and iowait are intentionally left
     # out because they are not drawn in the CPU bar.
     user: float = 0.0
     nice: float = 0.0
@@ -60,7 +60,6 @@ class CpuSample:
 class MemSample:
     total: int
     free: int
-    available: int
     buffers: int
     cached: int
     swap_total: int
@@ -218,7 +217,6 @@ class CpuCollector:
 _MEMINFO_FIELDS = {
     "MemTotal": "total",
     "MemFree": "free",
-    "MemAvailable": "available",
     "Buffers": "buffers",
     "Cached": "cached",
     "SReclaimable": "sreclaimable",
@@ -243,15 +241,9 @@ def read_meminfo(path: str = "/proc/meminfo") -> MemSample:
             values[field] = int(parts[0]) * 1024
     if "total" not in values:
         raise OSError("no MemTotal in " + path)
-    if "available" not in values:
-        # Very old kernels: approximate with free + buffers + cached.
-        values["available"] = (
-            values.get("free", 0) + values.get("buffers", 0) + values.get("cached", 0)
-        )
     return MemSample(
         total=values["total"],
         free=values.get("free", 0),
-        available=values["available"],
         buffers=values.get("buffers", 0),
         cached=values.get("cached", 0),
         swap_total=values.get("swap_total", 0),

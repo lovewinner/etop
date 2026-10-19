@@ -142,7 +142,7 @@ class MemInfoTests(unittest.TestCase):
         self.assertEqual(mem.cache_total, 4800000 * 1024)
         self.assertAlmostEqual(mem.swap_pct, 50.0)
 
-    def test_available_fallback(self):
+    def test_missing_optional_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "meminfo"
             path.write_text(
@@ -152,11 +152,13 @@ class MemInfoTests(unittest.TestCase):
                 "Cached: 300 kB\n"
             )
             mem = read_meminfo(str(path))
-        self.assertEqual(mem.available, 600 * 1024)
+        # used = total - free - cached - sreclaimable - buffers
         self.assertEqual(mem.used, 400 * 1024)
+        self.assertEqual(mem.shared, 0)
+        self.assertEqual(mem.cache, 300 * 1024)
 
     def test_no_swap(self):
-        mem = MemSample(1000, 500, 500, 0, 0, 0, 0)
+        mem = MemSample(1000, 500, 0, 0, 0, 0)
         self.assertEqual(mem.swap_pct, 0.0)
         self.assertEqual(mem.swap_used, 0)
 

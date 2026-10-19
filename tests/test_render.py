@@ -1,4 +1,3 @@
-import math
 import unittest
 
 from etop_tui.collect import CpuSample, MemSample
@@ -190,7 +189,6 @@ class CompactLayoutTests(unittest.TestCase):
         mem = MemSample(
             total=16 * GIB,
             free=4 * GIB,
-            available=8 * GIB,
             buffers=1 * GIB,
             cached=2 * GIB,
             swap_total=0,
@@ -216,7 +214,6 @@ class CompactLayoutTests(unittest.TestCase):
         mem = MemSample(
             total=100 * GIB,
             free=10 * GIB,
-            available=40 * GIB,
             buffers=10 * GIB,
             cached=20 * GIB,
             swap_total=0,

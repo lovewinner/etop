@@ -256,13 +256,14 @@ def print_once(options: Options) -> None:
         label: str,
         pct: Optional[float],
         extra: str = "",
+        percent_text: Optional[str] = None,
     ) -> None:
         if pct is None:
             filled, empty = " " * width, ""
             percent = "  n/a"
         else:
             filled, empty = pipe_parts(pct, width)
-            percent = f"{pct:5.1f}%"
+            percent = percent_text or f"{pct:5.1f}%"
             if use_ansi:
                 colour = _ANSI_COLORS[load_band(pct)]
                 filled = colour + filled + _ANSI_RESET
@@ -272,7 +273,11 @@ def print_once(options: Options) -> None:
             line += "  " + extra
         print(line.rstrip())
 
-    row("CPU", sample.total)
+    row(
+        "CPU",
+        sample.total,
+        percent_text=f"{len(sample.cores)}({sample.total:.1f}%)",
+    )
     row(
         "MEM",
         mem.used_pct,
