@@ -273,10 +273,14 @@ def print_once(options: Options) -> None:
             line += "  " + extra
         print(line.rstrip())
 
+    cpu_extra = ""
+    if sample.temp is not None:
+        cpu_extra = f"{sample.temp:.0f}{'C' if ascii_mode else '°C'}"
     row(
         "CPU",
         sample.total,
         percent_text=f"{len(sample.cores)}({sample.total:.1f}%)",
+        extra=cpu_extra,
     )
     row(
         "MEM",

@@ -4,7 +4,7 @@
 
 | 指标 | 说明 |
 | --- | --- |
-| **CPU** | 整体利用率与按时间类别分段的彩色 `|` 进度条 |
+| **CPU** | 整体利用率、逻辑核数、温度与按时间类别分段的彩色 `|` 进度条 |
 | **内存** | 物理内存使用情况，条内按 used/shared/buffers/cache 分段 |
 | **GPU** | 利用率（检测到 GPU 时显示） |
 | **显存** | 显存占用量与百分比（与 GPU 同一行显示） |
@@ -32,17 +32,17 @@ etop
 ```text
  dev24G 10.14.25.86 up 11d 16h                     11:33:59
  load 0.14 0.37 0.36  cpu 2/2028  gpu 4
- CPU  [|||||                           ]          20(12.4%)
+ CPU  [||||||                          ]     20(13.4%) 52°C
  MEM  [||||||||||||||||||||||||||||||||]   9.7/15.6G(62.2%)
  GPU  [||||||||||||||||||||||||||||||  ] 14.9/16G(93%) 54°C
  etop 0.1.0  q quit  p pause  +/-  h help
 ```
 
-示例只展示字符，实际颜色见下方的分段说明。主机名使用高亮蓝色加粗显示，便于在多台机器间快速确认当前主机；紧随其后的是默认路由所在网卡的 IPv4 地址（没有默认路由或取不到地址时省略）。版本信息位于底部左下角 footer；第二行还显示 CPU 任务数（running/total 线程）和 GPU 任务数（检测到 GPU 时）。所有指标（CPU、内存、GPU 利用率与显存）都使用 htop 风格、以 `[` `]` 包裹的彩色 `|` 条。CPU 行末尾显示逻辑核数与整体利用率，例如 `20(12.4%)` 表示 20 个逻辑核、整体利用率 12.4%。单张 GPU 也只占一行：显存与温度附在利用率条之后，不再单独占用 VRAM 行。
+示例只展示字符，实际颜色见下方的分段说明。主机名使用高亮蓝色加粗显示，便于在多台机器间快速确认当前主机；紧随其后的是默认路由所在网卡的 IPv4 地址（没有默认路由或取不到地址时省略）。版本信息位于底部左下角 footer；第二行还显示 CPU 任务数（running/total 线程）和 GPU 任务数（检测到 GPU 时）。所有指标（CPU、内存、GPU 利用率与显存）都使用 htop 风格、以 `[` `]` 包裹的彩色 `|` 条。CPU 行末尾显示逻辑核数与整体利用率，例如 `20(12.4%)` 表示 20 个逻辑核、整体利用率 12.4%；检测到 CPU 温度传感器时还会附上温度（如 `52°C`），虚拟机等无传感器的环境自动省略。单张 GPU 也只占一行：显存与温度附在利用率条之后，不再单独占用 VRAM 行。
 
 进度条使用两套配色：
 
-- **CPU**：按时间类别分段堆叠 —— user 绿、nice 蓝、system 红、irq 橙、steal 紫，各段合计为整体利用率。
+- **CPU**：按时间类别分段堆叠 —— user 绿、nice 蓝、system 红、irq 橙、steal 紫、iowait 青，各段合计为整体利用率（iowait 计入利用率，与 htop 详细模式一致；iowait 为 0 时不显示该段）。
 - **内存**：按类别分段堆叠 —— used 绿、shared 橙、buffers 蓝、cache 黄。条的长度是这四类之和（等于 `MemTotal - MemFree`）占物理内存的比例，因此通常比括号里的 used 百分比长；剩余空白表示空闲内存。计算方式与 htop 一致：
 
   ```text
@@ -82,7 +82,8 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 ## 数据来源
 
 - **CPU**：`/proc/stat`，两次采样之间 busy/total 的增量；首帧显示开机以来的平均值。
-  `iowait` 计入空闲，与 htop 口径一致。user/nice/system/irq/steal 的增量分别用于进度条分段。
+  busy 包含 `iowait`（与 htop 详细模式一致），user/nice/system/irq/steal/iowait 的增量分别用于进度条分段，各段之和即显示的整体利用率。
+- **CPU 温度**：优先读取 `/sys/class/hwmon/hwmon*` 中 coretemp/k10temp 等 CPU 传感器的 `temp*_input`，取最高值；没有 hwmon 时回退到 `/sys/class/thermal/thermal_zone*` 中类型含 cpu/pkg/package 的区域。无传感器时省略。
 - **内存**：`/proc/meminfo`。按 htop 的口径拆分 `MemFree`、`Buffers`、`Cached`、`SReclaimable` 和 `Shmem`：used = `MemTotal - MemFree - Cached - SReclaimable - Buffers`，shared = `Shmem`，cache = `Cached + SReclaimable - Shmem`；文字显示 `(used + shared)/MemTotal`，四个分段之和等于 `MemTotal - MemFree`。
 - **GPU**：
   - NVIDIA：`nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu`（名称仅用于识别，界面不显示型号）；
@@ -112,7 +113,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 ```text
  host 10.0.0.5 up 11d 16h          11:34:16
  load 0.14 0.37 0.36  cpu 2/2028  gpu 1
- CPU  [|||||||||||       ]        64(53.7%)
+ CPU  [|||||||||||       ]   64(53.7%) 61°C
  MEM  [||||||||||        ]   77/504G(15.3%)
  GPU  [|                 ] 1.2/24G(5%) 34°C
 ```
@@ -120,7 +121,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 多 GPU 时会把每张卡写成：
 
 ```text
- CPU  [|||||||||||||||||||             ]          64(53.7%)
+ CPU  [|||||||||||||||||||             ]     64(53.7%) 61°C
  MEM  [|||||||||||||||                 ]     77/504G(15.3%)
  GPU0 [||||||||||||||||||||||||||      ] 38.7/48G(81%) 34°C
  GPU1 [||||||||||||||||||||||||||      ] 38.7/48G(81%) 34°C
@@ -133,7 +134,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 ```text
  host 10.0.0.5 up 11d 16h          11:34:16
  load 0.14 0.37 0.36  cpu 2/2028  gpu 4
- CPU  [|||||||||||         ]      64(53.7%)
+ CPU  [|||||||||||         ] 64(53.7%) 61°C
  MEM  [|||||||||||         ] 77/504G(15.3%)
  etop 0.1.0  q quit  p pause  +/-  h help
 ```

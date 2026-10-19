@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import fcntl
+import glob
+import os
 import socket
 import struct
 from dataclasses import dataclass
@@ -37,9 +39,10 @@ class CpuTimes:
 
     @property
     def busy(self) -> int:
-        # iowait is time the CPU was idle waiting for I/O; htop counts it as
-        # idle, and doing the same keeps our numbers comparable.
-        return self.total - self.idle - self.iowait
+        # Everything except pure idle. iowait counts as busy here (htop's
+        # detailed CPU mode does the same) because it gets its own coloured
+        # segment in the bar; htop's default mode hides it inside idle.
+        return self.total - self.idle
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,9 @@ class CpuSample:
     system: float = 0.0
     irq: float = 0.0
     steal: float = 0.0
+    iowait: float = 0.0
+    # Hottest CPU sensor in °C, or None on machines without sensors (VMs).
+    temp: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -149,14 +155,15 @@ def _utilisation(previous: CpuTimes, current: CpuTimes) -> float:
 
 def _category_percentages(
     previous: Optional[CpuTimes], current: CpuTimes
-) -> Tuple[float, float, float, float, float]:
-    """Split busy CPU time into user/nice/system/irq/steal percentages."""
+) -> Tuple[float, float, float, float, float, float]:
+    """Split non-idle CPU time into user/nice/system/irq/steal/iowait."""
     if previous is None:
         total = current.total
         user, nice = current.user, current.nice
         system = current.system
         irq = current.irq + current.softirq
         steal = current.steal
+        iowait = current.iowait
     else:
         total = current.total - previous.total
         user = current.user - previous.user
@@ -166,8 +173,9 @@ def _category_percentages(
             previous.irq + previous.softirq
         )
         steal = current.steal - previous.steal
+        iowait = current.iowait - previous.iowait
     if total <= 0:
-        return 0.0, 0.0, 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     scale = 100.0 / total
     return (
         max(0.0, user * scale),
@@ -175,14 +183,77 @@ def _category_percentages(
         max(0.0, system * scale),
         max(0.0, irq * scale),
         max(0.0, steal * scale),
+        max(0.0, iowait * scale),
     )
+
+
+_CPU_HWMON_NAMES = {"coretemp", "k10temp", "zenpower", "cpu_thermal", "cpu"}
+
+
+def _read_text(path: str) -> Optional[str]:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return None
+
+
+def _read_temp_input(path: str) -> Optional[float]:
+    """Read a millidegree sysfs input, rejecting implausible values."""
+    text = _read_text(path)
+    if text is None:
+        return None
+    try:
+        milli = int(text)
+    except ValueError:
+        return None
+    celsius = milli / 1000.0
+    if 0.0 < celsius < 150.0:
+        return celsius
+    return None
+
+
+def read_cpu_temp(
+    hwmon_root: str = "/sys/class/hwmon",
+    thermal_root: str = "/sys/class/thermal",
+) -> Optional[float]:
+    """Return the hottest CPU temperature in °C, or None when unavailable.
+
+    Prefers hwmon sensors driven by coretemp/k10temp and friends; falls back
+    to thermal zones whose type mentions the CPU package. Machines without
+    any CPU sensor (most VMs) simply return None.
+    """
+    temps: List[float] = []
+    for hwmon in sorted(glob.glob(os.path.join(hwmon_root, "hwmon*"))):
+        name = _read_text(os.path.join(hwmon, "name"))
+        if name not in _CPU_HWMON_NAMES:
+            continue
+        for input_path in sorted(glob.glob(os.path.join(hwmon, "temp*_input"))):
+            value = _read_temp_input(input_path)
+            if value is not None:
+                temps.append(value)
+    if temps:
+        return max(temps)
+    for zone in sorted(glob.glob(os.path.join(thermal_root, "thermal_zone*"))):
+        ztype = (_read_text(os.path.join(zone, "type")) or "").lower()
+        if not any(key in ztype for key in ("cpu", "pkg", "package")):
+            continue
+        value = _read_temp_input(os.path.join(zone, "temp"))
+        if value is not None:
+            temps.append(value)
+    return max(temps) if temps else None
 
 
 class CpuCollector:
     """Stateful CPU sampler; percentages are deltas between calls."""
 
-    def __init__(self, path: str = "/proc/stat") -> None:
+    def __init__(
+        self,
+        path: str = "/proc/stat",
+        temp_reader: Optional[Callable[[], Optional[float]]] = None,
+    ) -> None:
         self._path = path
+        self._temp_reader = temp_reader or read_cpu_temp
         self._previous: Optional[Tuple[CpuTimes, List[CpuTimes]]] = None
 
     def sample(self) -> CpuSample:
@@ -211,7 +282,9 @@ class CpuCollector:
                 )
         breakdown = _category_percentages(previous_overall, overall)
         self._previous = (overall, cores)
-        return CpuSample(total, per_core, *breakdown)
+        return CpuSample(
+            total, per_core, *breakdown, temp=self._temp_reader()
+        )
 
 
 _MEMINFO_FIELDS = {

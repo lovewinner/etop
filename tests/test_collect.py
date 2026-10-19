@@ -5,6 +5,7 @@ from pathlib import Path
 from etop_tui.collect import (
     CpuCollector,
     MemSample,
+    read_cpu_temp,
     read_cpu_times,
     read_default_ipv4,
     read_meminfo,
@@ -51,23 +52,24 @@ class CpuCollectorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "stat"
             path.write_text(STAT_A)
-            collector = CpuCollector(str(path))
+            collector = CpuCollector(str(path), temp_reader=lambda: None)
             sample = collector.sample()
-        self.assertAlmostEqual(sample.total, 20.0)  # 200 busy / 1000 total
+        self.assertAlmostEqual(sample.total, 30.0)  # 300 busy / 1000 total
         self.assertEqual(len(sample.cores), 2)
-        self.assertAlmostEqual(sample.cores[0], 20.0)
-        self.assertAlmostEqual(sample.cores[1], 10.0)
+        self.assertAlmostEqual(sample.cores[0], 30.0)
+        self.assertAlmostEqual(sample.cores[1], 20.0)
         self.assertAlmostEqual(sample.user, 10.0)
         self.assertAlmostEqual(sample.nice, 0.0)
         self.assertAlmostEqual(sample.system, 10.0)
         self.assertAlmostEqual(sample.irq, 0.0)
         self.assertAlmostEqual(sample.steal, 0.0)
+        self.assertAlmostEqual(sample.iowait, 10.0)
 
     def test_delta_between_samples(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "stat"
             path.write_text(STAT_A)
-            collector = CpuCollector(str(path))
+            collector = CpuCollector(str(path), temp_reader=lambda: None)
             collector.sample()
             path.write_text(STAT_B)
             sample = collector.sample()
@@ -76,6 +78,15 @@ class CpuCollectorTests(unittest.TestCase):
         self.assertAlmostEqual(sample.cores[1], 50 / 150 * 100)
         self.assertAlmostEqual(sample.user, 50.0)  # +100 user / 200 total
         self.assertAlmostEqual(sample.system, 0.0)
+        self.assertAlmostEqual(sample.iowait, 0.0)  # iowait did not move
+
+    def test_temp_flows_into_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "stat"
+            path.write_text(STAT_A)
+            collector = CpuCollector(str(path), temp_reader=lambda: 52.0)
+            sample = collector.sample()
+        self.assertEqual(sample.temp, 52.0)
 
     def test_read_aggregate(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -124,6 +135,52 @@ class DefaultRouteTests(unittest.TestCase):
 
     def test_missing_route_file(self):
         self.assertEqual(read_default_ipv4("/nonexistent/route"), "")
+
+
+class CpuTempTests(unittest.TestCase):
+    def _hwmon(self, root: Path, name: str, millis) -> None:
+        hwmon = root / "hwmon0"
+        hwmon.mkdir()
+        (hwmon / "name").write_text(name + "\n")
+        for index, milli in enumerate(millis, start=1):
+            (hwmon / f"temp{index}_input").write_text(f"{milli}\n")
+
+    def test_reads_hottest_coretemp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._hwmon(root, "coretemp", [52000, 49000, 0])
+            self.assertEqual(
+                read_cpu_temp(hwmon_root=str(root), thermal_root=str(root)),
+                52.0,
+            )
+
+    def test_ignores_non_cpu_sensors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._hwmon(root, "nvme", [41000])
+            self.assertIsNone(
+                read_cpu_temp(hwmon_root=str(root), thermal_root=str(root))
+            )
+
+    def test_thermal_zone_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            zone = root / "thermal_zone0"
+            zone.mkdir()
+            (zone / "type").write_text("x86_pkg_temp\n")
+            (zone / "temp").write_text("61000\n")
+            self.assertEqual(
+                read_cpu_temp(hwmon_root=str(root), thermal_root=str(root)),
+                61.0,
+            )
+
+    def test_missing_paths(self):
+        self.assertIsNone(
+            read_cpu_temp(
+                hwmon_root="/nonexistent/hwmon",
+                thermal_root="/nonexistent/thermal",
+            )
+        )
 
 
 class MemInfoTests(unittest.TestCase):

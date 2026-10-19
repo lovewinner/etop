@@ -207,9 +207,28 @@ class CompactLayoutTests(unittest.TestCase):
         self.assertAlmostEqual(metrics[2].pct, 21.0)
         self.assertEqual(metrics[2].detail, "2.0/24G(8%) 54°C")
 
+    def test_cpu_detail_includes_temperature(self):
+        cpu = CpuSample(42.0, (10.0, 20.0), temp=52.0)
+        mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
+        metrics = compact_metrics(cpu, mem, [])
+        self.assertEqual(metrics[0].detail, "2(42.0%) 52°C")
+
+    def test_cpu_detail_without_temperature(self):
+        cpu = CpuSample(42.0, (10.0, 20.0))
+        mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
+        metrics = compact_metrics(cpu, mem, [])
+        self.assertEqual(metrics[0].detail, "2(42.0%)")
+
     def test_cpu_and_memory_segments(self):
         cpu = CpuSample(
-            60.0, (), user=30.0, nice=5.0, system=20.0, irq=3.0, steal=2.0
+            65.0,
+            (),
+            user=30.0,
+            nice=5.0,
+            system=20.0,
+            irq=3.0,
+            steal=2.0,
+            iowait=5.0,
         )
         mem = MemSample(
             total=100 * GIB,
@@ -230,6 +249,7 @@ class CompactLayoutTests(unittest.TestCase):
                 (20.0, "cpu_system"),
                 (3.0, "cpu_irq"),
                 (2.0, "cpu_steal"),
+                (5.0, "cpu_iowait"),
             ),
         )
         self.assertEqual(

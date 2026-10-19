@@ -109,6 +109,7 @@ class Palette:
             cpu_nice = 110
             cpu_irq = 180
             cpu_steal = 141
+            cpu_iowait = 116
             # Desaturated terracotta, distinct from the cache yellow.
             mem_shared = 173
             mem_buffers = 110
@@ -125,6 +126,7 @@ class Palette:
             cpu_nice = curses.COLOR_BLUE
             cpu_irq = curses.COLOR_YELLOW
             cpu_steal = curses.COLOR_MAGENTA
+            cpu_iowait = curses.COLOR_CYAN
             mem_shared = curses.COLOR_RED
             mem_buffers = curses.COLOR_BLUE
             mem_cache = curses.COLOR_YELLOW
@@ -143,6 +145,7 @@ class Palette:
             "cpu_system": bad,
             "cpu_irq": cpu_irq,
             "cpu_steal": cpu_steal,
+            "cpu_iowait": cpu_iowait,
             "mem_used": good,
             "mem_shared": mem_shared,
             "mem_buffers": mem_buffers,
@@ -482,6 +485,7 @@ def _cpu_segments(cpu: CpuSample) -> Tuple[Tuple[float, str], ...]:
         (cpu.system, "cpu_system"),
         (cpu.irq, "cpu_irq"),
         (cpu.steal, "cpu_steal"),
+        (cpu.iowait, "cpu_iowait"),
     )
     return tuple((value, colour) for value, colour in parts if value > 0)
 
@@ -512,13 +516,11 @@ def compact_metrics(
         if mem_detail
         else f"{mem.used_pct:.1f}%"
     )
+    cpu_detail = f"{len(cpu.cores)}({cpu.total:.1f}%)"
+    if cpu.temp is not None:
+        cpu_detail += " " + _temp_text(cpu.temp, ascii_mode)
     rows = [
-        CompactMetric(
-            "CPU",
-            cpu.total,
-            f"{len(cpu.cores)}({cpu.total:.1f}%)",
-            _cpu_segments(cpu),
-        ),
+        CompactMetric("CPU", cpu.total, cpu_detail, _cpu_segments(cpu)),
         CompactMetric("MEM", mem.used_pct, mem_suffix, _mem_segments(mem)),
     ]
     if gpus:
