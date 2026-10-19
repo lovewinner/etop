@@ -38,6 +38,8 @@ MemFree:         1000000 kB
 MemAvailable:    8192000 kB
 Buffers:          200000 kB
 Cached:          4000000 kB
+SReclaimable:    1000000 kB
+Shmem:            400000 kB
 SwapCached:            0 kB
 SwapTotal:       2048000 kB
 SwapFree:        1024000 kB
@@ -131,9 +133,13 @@ class MemInfoTests(unittest.TestCase):
             path.write_text(MEMINFO)
             mem = read_meminfo(str(path))
         self.assertEqual(mem.total, 16384000 * 1024)
-        self.assertEqual(mem.used, 8192000 * 1024)
-        self.assertAlmostEqual(mem.used_pct, 50.0)
-        self.assertEqual(mem.cache_total, 4200000 * 1024)
+        # used = total - free - cached - sreclaimable - buffers
+        self.assertEqual(mem.used, 10184000 * 1024)
+        self.assertEqual(mem.shared, 400000 * 1024)
+        self.assertEqual(mem.cache, 4600000 * 1024)
+        self.assertEqual(mem.used_total, 10584000 * 1024)
+        self.assertAlmostEqual(mem.used_pct, 64.6, places=1)
+        self.assertEqual(mem.cache_total, 4800000 * 1024)
         self.assertAlmostEqual(mem.swap_pct, 50.0)
 
     def test_available_fallback(self):

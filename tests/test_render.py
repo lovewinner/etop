@@ -189,12 +189,14 @@ class CompactLayoutTests(unittest.TestCase):
         cpu = CpuSample(42.0, (10.0, 20.0))
         mem = MemSample(
             total=16 * GIB,
-            free=1,
+            free=4 * GIB,
             available=8 * GIB,
-            buffers=0,
-            cached=0,
+            buffers=1 * GIB,
+            cached=2 * GIB,
             swap_total=0,
             swap_free=0,
+            sreclaimable=1 * GIB,
+            shmem=0,
         )
         gpu = GpuSample("nvidia", 0, "RTX", 21.0, 2 * GIB, 24 * GIB, 54.0)
         metrics = compact_metrics(cpu, mem, [gpu], ascii_mode=False)
@@ -202,7 +204,7 @@ class CompactLayoutTests(unittest.TestCase):
             [metric.label for metric in metrics], ["CPU", "MEM", "GPU"]
         )
         self.assertAlmostEqual(metrics[0].pct, 42.0)
-        self.assertEqual(metrics[0].detail, " 42.0%")
+        self.assertEqual(metrics[0].detail, "2(42.0%)")
         self.assertEqual(metrics[1].detail, "8.0/16G(50.0%)")
         self.assertAlmostEqual(metrics[2].pct, 21.0)
         self.assertEqual(metrics[2].detail, "2.0/24G(8%) 54°C")
@@ -213,12 +215,14 @@ class CompactLayoutTests(unittest.TestCase):
         )
         mem = MemSample(
             total=100 * GIB,
-            free=1,
+            free=10 * GIB,
             available=40 * GIB,
             buffers=10 * GIB,
             cached=20 * GIB,
             swap_total=0,
             swap_free=0,
+            sreclaimable=5 * GIB,
+            shmem=5 * GIB,
         )
         metrics = compact_metrics(cpu, mem, [])
         self.assertEqual(
@@ -233,8 +237,15 @@ class CompactLayoutTests(unittest.TestCase):
         )
         self.assertEqual(
             metrics[1].segments,
-            ((60.0, "mem_used"), (10.0, "mem_buffers"), (20.0, "mem_cache")),
+            (
+                (55.0, "mem_used"),
+                (5.0, "mem_shared"),
+                (10.0, "mem_buffers"),
+                (20.0, "mem_cache"),
+            ),
         )
+        self.assertAlmostEqual(metrics[1].pct, 60.0)
+        self.assertEqual(metrics[1].detail, "60/100G(60.0%)")
 
     def test_multi_gpu_metrics_have_bars_and_aligned_text(self):
         cpu = CpuSample(10.0, ())

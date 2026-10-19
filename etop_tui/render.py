@@ -109,6 +109,8 @@ class Palette:
             cpu_nice = 110
             cpu_irq = 180
             cpu_steal = 141
+            # Desaturated terracotta, distinct from the cache yellow.
+            mem_shared = 173
             mem_buffers = 110
             mem_cache = 186
         else:
@@ -123,6 +125,7 @@ class Palette:
             cpu_nice = curses.COLOR_BLUE
             cpu_irq = curses.COLOR_YELLOW
             cpu_steal = curses.COLOR_MAGENTA
+            mem_shared = curses.COLOR_RED
             mem_buffers = curses.COLOR_BLUE
             mem_cache = curses.COLOR_YELLOW
         colours = {
@@ -141,6 +144,7 @@ class Palette:
             "cpu_irq": cpu_irq,
             "cpu_steal": cpu_steal,
             "mem_used": good,
+            "mem_shared": mem_shared,
             "mem_buffers": mem_buffers,
             "mem_cache": mem_cache,
         }
@@ -488,8 +492,9 @@ def _mem_segments(mem: MemSample) -> Tuple[Tuple[float, str], ...]:
     scale = 100.0 / mem.total
     parts = (
         (mem.used * scale, "mem_used"),
+        (mem.shared * scale, "mem_shared"),
         (mem.buffers * scale, "mem_buffers"),
-        (mem.cached * scale, "mem_cache"),
+        (mem.cache * scale, "mem_cache"),
     )
     return tuple((value, colour) for value, colour in parts if value > 0)
 
@@ -501,7 +506,7 @@ def compact_metrics(
     ascii_mode: bool = False,
 ) -> List[CompactMetric]:
     """One row of data per metric, for terminals with very few rows."""
-    mem_detail = compact_bytes(mem.used, mem.total)
+    mem_detail = compact_bytes(mem.used_total, mem.total)
     mem_suffix = (
         f"{mem_detail}({mem.used_pct:.1f}%)"
         if mem_detail
@@ -509,7 +514,10 @@ def compact_metrics(
     )
     rows = [
         CompactMetric(
-            "CPU", cpu.total, f"{cpu.total:5.1f}%", _cpu_segments(cpu)
+            "CPU",
+            cpu.total,
+            f"{len(cpu.cores)}({cpu.total:.1f}%)",
+            _cpu_segments(cpu),
         ),
         CompactMetric("MEM", mem.used_pct, mem_suffix, _mem_segments(mem)),
     ]

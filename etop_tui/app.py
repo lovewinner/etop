@@ -276,7 +276,7 @@ def print_once(options: Options) -> None:
     row(
         "MEM",
         mem.used_pct,
-        f"{format_bytes(mem.used)} / {format_bytes(mem.total)}",
+        f"{format_bytes(mem.used_total)} / {format_bytes(mem.total)}",
     )
     for gpu in gpus:
         details = []

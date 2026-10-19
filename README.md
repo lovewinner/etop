@@ -5,7 +5,7 @@
 | 指标 | 说明 |
 | --- | --- |
 | **CPU** | 整体利用率与按时间类别分段的彩色 `|` 进度条 |
-| **内存** | 物理内存使用情况，条内按 used/buffers/cache 分段 |
+| **内存** | 物理内存使用情况，条内按 used/shared/buffers/cache 分段 |
 | **GPU** | 利用率（检测到 GPU 时显示） |
 | **显存** | 显存占用量与百分比（与 GPU 同一行显示） |
 
@@ -32,21 +32,29 @@ etop
 ```text
  dev24G 10.14.25.86 up 11d 16h                     11:33:59
  load 0.14 0.37 0.36  cpu 2/2028  gpu 4
- CPU  [|||||                           ]              12.4%
- MEM  [||||||||||||||||||||||||||||||| ]   9.6/15.6G(61.5%)
+ CPU  [|||||                           ]          20(12.4%)
+ MEM  [||||||||||||||||||||||||||||||||]   9.7/15.6G(62.2%)
  GPU  [||||||||||||||||||||||||||||||  ] 14.9/16G(93%) 54°C
  etop 0.1.0  q quit  p pause  +/-  h help
 ```
 
-示例只展示字符，实际颜色见下方的分段说明。主机名使用高亮蓝色加粗显示，便于在多台机器间快速确认当前主机；紧随其后的是默认路由所在网卡的 IPv4 地址（没有默认路由或取不到地址时省略）。版本信息位于底部左下角 footer；第二行还显示 CPU 任务数（running/total 线程）和 GPU 任务数（检测到 GPU 时）。所有指标（CPU、内存、GPU 利用率与显存）都使用 htop 风格、以 `[` `]` 包裹的彩色 `|` 条。单张 GPU 也只占一行：显存与温度附在利用率条之后，不再单独占用 VRAM 行。
+示例只展示字符，实际颜色见下方的分段说明。主机名使用高亮蓝色加粗显示，便于在多台机器间快速确认当前主机；紧随其后的是默认路由所在网卡的 IPv4 地址（没有默认路由或取不到地址时省略）。版本信息位于底部左下角 footer；第二行还显示 CPU 任务数（running/total 线程）和 GPU 任务数（检测到 GPU 时）。所有指标（CPU、内存、GPU 利用率与显存）都使用 htop 风格、以 `[` `]` 包裹的彩色 `|` 条。CPU 行末尾显示逻辑核数与整体利用率，例如 `20(12.4%)` 表示 20 个逻辑核、整体利用率 12.4%。单张 GPU 也只占一行：显存与温度附在利用率条之后，不再单独占用 VRAM 行。
 
 进度条使用两套配色：
 
 - **CPU**：按时间类别分段堆叠 —— user 绿、nice 蓝、system 红、irq 橙、steal 紫，各段合计为整体利用率。
-- **内存**：按类别分段堆叠 —— used 绿、buffers 蓝、cache 黄。条的长度是 used+buffers+cache 占物理内存的比例，所以通常比括号里的 used 百分比长；剩余空白表示未使用内存。
+- **内存**：按类别分段堆叠 —— used 绿、shared 橙、buffers 蓝、cache 黄。条的长度是这四类之和（等于 `MemTotal - MemFree`）占物理内存的比例，因此通常比括号里的 used 百分比长；剩余空白表示空闲内存。计算方式与 htop 一致：
+
+  ```text
+  used   = MemTotal - MemFree - Cached - SReclaimable - Buffers
+  shared = Shmem
+  cache  = Cached + SReclaimable - Shmem
+  文字   = (used + shared) / MemTotal
+  ```
+
 - **GPU**：没有可拆分的类别，整条按 4 档负载着色：低于 40% 绿色、40–60% 黄色、60–85% 橙色、85% 以上红色。
 
-`--once` 的纯文本输出仍统一按 4 档负载着色。256 色终端使用低饱和度的绿/黄/橙/红（#87AF87 / #D7D787 / #D7AF87 / #D78787）以及柔和的蓝/紫；8 色终端会合并相近颜色。终端不支持颜色时，CPU/内存条用不同字符（`|#*@$%&`）区分分段，GPU 条用加粗/下划线区分档位。背景始终沿用终端默认设置，不写入背景色，也不会回退到黑色；同时不使用 faint/dim 属性，避免部分终端把它渲染成底色。终端主题开启透明背景时即可透出桌面。
+`--once` 的纯文本输出仍统一按 4 档负载着色。256 色终端使用低饱和度的绿/黄/橙/红（#87AF87 / #D7D787 / #D7AF87 / #D78787）以及柔和的蓝/橙；8 色终端会合并相近颜色。终端不支持颜色时，CPU/内存条用不同字符（`|#*@$%&`）区分分段，GPU 条用加粗/下划线区分档位。背景始终沿用终端默认设置，不写入背景色，也不会回退到黑色；同时不使用 faint/dim 属性，避免部分终端把它渲染成底色。终端主题开启透明背景时即可透出桌面。
 
 ## 按键
 
@@ -75,7 +83,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 
 - **CPU**：`/proc/stat`，两次采样之间 busy/total 的增量；首帧显示开机以来的平均值。
   `iowait` 计入空闲，与 htop 口径一致。user/nice/system/irq/steal 的增量分别用于进度条分段。
-- **内存**：`/proc/meminfo`。使用量 = `MemTotal - MemAvailable`，界面显示使用量、总量与使用率；`Buffers` 和 `Cached` 同时用于进度条分段。
+- **内存**：`/proc/meminfo`。按 htop 的口径拆分 `MemFree`、`Buffers`、`Cached`、`SReclaimable` 和 `Shmem`：used = `MemTotal - MemFree - Cached - SReclaimable - Buffers`，shared = `Shmem`，cache = `Cached + SReclaimable - Shmem`；文字显示 `(used + shared)/MemTotal`，四个分段之和等于 `MemTotal - MemFree`。
 - **GPU**：
   - NVIDIA：`nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu`（名称仅用于识别，界面不显示型号）；
   - AMD / 其他 DRM 驱动：`/sys/class/drm/card*/device/gpu_busy_percent`、`mem_info_vram_used`、`mem_info_vram_total`、`hwmon/*/temp1_input`。
@@ -104,16 +112,16 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 ```text
  host 10.0.0.5 up 11d 16h          11:34:16
  load 0.14 0.37 0.36  cpu 2/2028  gpu 1
- CPU  [|||||||||||       ]            53.7%
- MEM  [||||||            ]   77/504G(15.3%)
+ CPU  [|||||||||||       ]        64(53.7%)
+ MEM  [||||||||||        ]   77/504G(15.3%)
  GPU  [|                 ] 1.2/24G(5%) 34°C
 ```
 
 多 GPU 时会把每张卡写成：
 
 ```text
- CPU  [|||||||||||||||||||             ]              53.7%
- MEM  [||||||||||                      ]     77/504G(15.3%)
+ CPU  [|||||||||||||||||||             ]          64(53.7%)
+ MEM  [|||||||||||||||                 ]     77/504G(15.3%)
  GPU0 [||||||||||||||||||||||||||      ] 38.7/48G(81%) 34°C
  GPU1 [||||||||||||||||||||||||||      ] 38.7/48G(81%) 34°C
  GPU2 [|||||||||||||                   ] 20.2/48G(42%) 33°C
@@ -125,8 +133,8 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 ```text
  host 10.0.0.5 up 11d 16h          11:34:16
  load 0.14 0.37 0.36  cpu 2/2028  gpu 4
- CPU  [|||||||||||         ]          53.7%
- MEM  [|||||||             ] 77/504G(15.3%)
+ CPU  [|||||||||||         ]      64(53.7%)
+ MEM  [|||||||||||         ] 77/504G(15.3%)
  etop 0.1.0  q quit  p pause  +/-  h help
 ```
 
@@ -138,4 +146,4 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 python3 -m unittest discover -s tests -v
 ```
 
-测试覆盖 `/proc` 解析、CPU 时间分类、默认路由与 IP 解析、NVIDIA CSV 解析、sysfs GPU 采样、分段进度条绘制、布局与格式化。
+测试覆盖 `/proc` 解析、CPU 时间分类、内存分类核算、默认路由与 IP 解析、NVIDIA CSV 解析、sysfs GPU 采样、分段进度条绘制、布局与格式化。

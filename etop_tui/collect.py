@@ -65,14 +65,38 @@ class MemSample:
     cached: int
     swap_total: int
     swap_free: int
+    sreclaimable: int = 0
+    shmem: int = 0
 
     @property
     def used(self) -> int:
-        return max(0, self.total - self.available)
+        """Non-cache, non-shared memory, matching htop's used segment."""
+        value = (
+            self.total
+            - self.free
+            - self.cached
+            - self.sreclaimable
+            - self.buffers
+        )
+        return max(0, value)
+
+    @property
+    def shared(self) -> int:
+        return max(0, self.shmem)
+
+    @property
+    def cache(self) -> int:
+        """Reclaimable cache, excluding the shared memory already shown."""
+        return max(0, self.cached + self.sreclaimable - self.shmem)
+
+    @property
+    def used_total(self) -> int:
+        """Value shown in the text: used plus shared memory."""
+        return self.used + self.shared
 
     @property
     def used_pct(self) -> float:
-        return 100.0 * self.used / self.total if self.total else 0.0
+        return 100.0 * self.used_total / self.total if self.total else 0.0
 
     @property
     def swap_used(self) -> int:
@@ -84,7 +108,7 @@ class MemSample:
 
     @property
     def cache_total(self) -> int:
-        return self.cached + self.buffers
+        return self.cache + self.buffers
 
 
 def read_cpu_times(path: str = "/proc/stat") -> Tuple[CpuTimes, List[CpuTimes]]:
@@ -197,6 +221,8 @@ _MEMINFO_FIELDS = {
     "MemAvailable": "available",
     "Buffers": "buffers",
     "Cached": "cached",
+    "SReclaimable": "sreclaimable",
+    "Shmem": "shmem",
     "SwapTotal": "swap_total",
     "SwapFree": "swap_free",
 }
@@ -230,6 +256,8 @@ def read_meminfo(path: str = "/proc/meminfo") -> MemSample:
         cached=values.get("cached", 0),
         swap_total=values.get("swap_total", 0),
         swap_free=values.get("swap_free", 0),
+        sreclaimable=values.get("sreclaimable", 0),
+        shmem=values.get("shmem", 0),
     )
 
 
