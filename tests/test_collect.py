@@ -6,6 +6,7 @@ from etop_tui.collect import (
     CpuCollector,
     MemSample,
     read_cpu_times,
+    read_default_ipv4,
     read_meminfo,
     read_task_counts,
 )
@@ -82,6 +83,38 @@ class TaskCountTests(unittest.TestCase):
             path = Path(directory) / "loadavg"
             path.write_text("0.23 0.40 0.35 2/2028 1060386\n")
             self.assertEqual(read_task_counts(str(path)), (2, 2028))
+
+
+class DefaultRouteTests(unittest.TestCase):
+    HEADER = (
+        "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\t"
+        "Mask\tMTU\tWindow\tIRTT\n"
+    )
+
+    def _read(self, body, lookup=lambda name: f"ip-{name}"):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "route"
+            path.write_text(self.HEADER + body)
+            return read_default_ipv4(str(path), address_lookup=lookup)
+
+    def test_uses_default_route_interface(self):
+        body = (
+            "eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t"
+            "0\t0\t0\n"
+            "eth1\t0000FEA9\t00000000\t0001\t0\t0\t0\t0000FFFF\t"
+            "0\t0\t0\n"
+        )
+        self.assertEqual(self._read(body), "ip-eth0")
+
+    def test_skips_down_interfaces(self):
+        body = (
+            "eth0\t00000000\t0101A8C0\t0000\t0\t0\t100\t00000000\t"
+            "0\t0\t0\n"
+        )
+        self.assertEqual(self._read(body), "")
+
+    def test_missing_route_file(self):
+        self.assertEqual(read_default_ipv4("/nonexistent/route"), "")
 
 
 class MemInfoTests(unittest.TestCase):

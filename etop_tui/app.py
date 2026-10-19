@@ -17,6 +17,7 @@ from .collect import (
     CpuCollector,
     CpuSample,
     MemSample,
+    read_default_ipv4,
     read_meminfo,
     read_task_counts,
     read_uptime,
@@ -84,6 +85,7 @@ class App:
         backends = [DemoBackend()] if options.demo else detect_backends(options.gpu)
         self.gpu_monitor = GpuMonitor(backends)
         self.hostname = socket.gethostname()
+        self.ip = read_default_ipv4()
         self.cpu_sample: Optional[CpuSample] = None
         self.mem_sample: Optional[MemSample] = None
         self.gpus: List[GpuSample] = []
@@ -111,6 +113,7 @@ class App:
             self.uptime = read_uptime()
         except OSError:
             pass
+        self.ip = read_default_ipv4()
         self.gpu_tasks = self.gpu_monitor.task_count()
 
     def _draw(self) -> None:
@@ -129,6 +132,7 @@ class App:
                 self.pal,
                 self.options.ascii,
                 self.hostname,
+                self.ip,
                 self.uptime,
                 self.loads,
                 self.tasks,
@@ -230,8 +234,12 @@ def print_once(options: Options) -> None:
     except OSError:
         uptime = 0.0
 
+    identity = socket.gethostname()
+    ip = read_default_ipv4()
+    if ip:
+        identity += f"  {ip}"
     print(
-        f"etop {__version__}  {socket.gethostname()}  up {format_uptime(uptime)}"
+        f"etop {__version__}  {identity}  up {format_uptime(uptime)}"
         f"  load {loads[0]:.2f} {loads[1]:.2f} {loads[2]:.2f}"
     )
     print()

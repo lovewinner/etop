@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import fcntl
+import socket
+import struct
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -201,3 +204,41 @@ def read_task_counts(path: str = "/proc/loadavg") -> Tuple[int, int]:
         parts = handle.read().split()
     running, total = parts[3].split("/", 1)
     return int(running), int(total)
+
+
+def interface_ipv4(name: str) -> str:
+    """Return the IPv4 address configured on *name*, or "" if unavailable."""
+    request = struct.pack("256s", name.encode("utf-8")[:15])
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        result = fcntl.ioctl(sock.fileno(), 0x8915, request)  # SIOCGIFADDR
+    except OSError:
+        return ""
+    finally:
+        sock.close()
+    return socket.inet_ntoa(result[20:24])
+
+
+def read_default_ipv4(
+    path: str = "/proc/net/route",
+    address_lookup: Optional[Callable[[str], str]] = None,
+) -> str:
+    """Return the IPv4 address of the interface carrying the default route."""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            rows = handle.readlines()[1:]
+    except OSError:
+        return ""
+    lookup = address_lookup or interface_ipv4
+    for row in rows:
+        fields = row.split()
+        if len(fields) < 4 or fields[1] != "00000000":
+            continue
+        try:
+            flags = int(fields[3], 16)
+        except ValueError:
+            continue
+        if not flags & 0x1:  # RTF_UP
+            continue
+        return lookup(fields[0])
+    return ""

@@ -356,6 +356,7 @@ def draw_header(
     win,
     rect: Rect,
     hostname: str,
+    ip: str,
     uptime: float,
     loads: Sequence[float],
     tasks: Tuple[int, int],
@@ -374,6 +375,10 @@ def draw_header(
         put(win, rect.y, rect.w - len(clock), clock, pal.attr("dim"))
     start = len(left) + 1
     limit = rect.w - len(clock) - 1 if rect.w >= len(clock) else rect.w
+    if ip and start < limit:
+        ip_text = ip[: limit - start]
+        put(win, rect.y, start, ip_text, pal.attr("dim"))
+        start += len(ip_text) + 1
     if start < limit:
         put(win, rect.y, start, uptime_text[: limit - start], pal.attr("dim"))
 
@@ -479,6 +484,7 @@ def draw_compact(
     pal: Palette,
     ascii_mode: bool,
     hostname: str,
+    ip: str,
     uptime: float,
     loads: Sequence[float],
     tasks: Tuple[int, int],
@@ -498,6 +504,7 @@ def draw_compact(
         win,
         header,
         hostname,
+        ip,
         uptime,
         loads,
         tasks,

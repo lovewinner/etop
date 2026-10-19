@@ -30,7 +30,7 @@ etop
 ## 界面
 
 ```text
- host up 11d 16h                                   11:26:56
+ dev24G 10.14.25.86 up 11d 16h                     10:53:41
  load 0.14 0.37 0.36  cpu 2/2028  gpu 4
  CPU  [||||                            ]              12.4%
  MEM  [||||||||||||||||||||            ]   9.6/15.6G(61.5%)
@@ -38,7 +38,7 @@ etop
  etop 0.1.0  q quit  p pause  +/-  h help
 ```
 
-主机名使用高亮蓝色加粗显示，便于在多台机器间快速确认当前主机。版本信息位于底部左下角 footer；第二行还显示 CPU 任务数（running/total 线程）和 GPU 任务数（检测到 GPU 时）。所有指标（CPU、内存、GPU 利用率与显存）都使用 htop 风格、以 `[` `]` 包裹的彩色 `|` 条。单张 GPU 也只占一行：显存与温度附在利用率条之后，不再单独占用 VRAM 行。
+主机名使用高亮蓝色加粗显示，便于在多台机器间快速确认当前主机；紧随其后的是默认路由所在网卡的 IPv4 地址（没有默认路由或取不到地址时省略）。版本信息位于底部左下角 footer；第二行还显示 CPU 任务数（running/total 线程）和 GPU 任务数（检测到 GPU 时）。所有指标（CPU、内存、GPU 利用率与显存）都使用 htop 风格、以 `[` `]` 包裹的彩色 `|` 条。单张 GPU 也只占一行：显存与温度附在利用率条之后，不再单独占用 VRAM 行。
 
 颜色按 4 档分色：低于 40% 绿色、40–60% 黄色、60–85% 橙色、85% 以上红色。分档作用于所有进度条。`--once` 在彩色终端下同样着色；256 色终端使用低饱和度的绿/黄/橙/红（#87AF87 / #D7D787 / #D7AF87 / #D78787），8 色终端会合并中间两档。若终端不支持颜色，则用加粗/下划线区分档位。背景始终沿用终端默认设置，不写入背景色，也不会回退到黑色；同时不使用 faint/dim 属性，避免部分终端把它渲染成底色。终端主题开启透明背景时即可透出桌面。
 
@@ -73,6 +73,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
   - NVIDIA：`nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu`；
   - AMD / 其他 DRM 驱动：`/sys/class/drm/card*/device/gpu_busy_percent`、`mem_info_vram_used`、`mem_info_vram_total`、`hwmon/*/temp1_input`。
   - 未检测到 GPU 时自动隐藏 GPU 与显存行；驱动短暂失败时保留上一帧并标记 `stale`。
+- **IP 地址**：从 `/proc/net/route` 找到目标为 `0.0.0.0` 且处于 UP 状态的默认路由网卡，再用 `SIOCGIFADDR` 读取其 IPv4 地址。
 - **Load / uptime / tasks**：`os.getloadavg()`、`/proc/uptime`，任务数取自 `/proc/loadavg` 的 `running/total`。
 - **GPU 任务数**：NVIDIA 统计 `nvidia-smi --query-compute-apps=pid` 的唯一 PID 数；sysfs 后端近似统计持有 `/dev/dri` 文件描述符的进程数。
 
@@ -94,8 +95,8 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 每项指标占一行（标签 + `[|...]` 彩色条 + 右对齐文字），最小 **44x5**。单张 GPU 时 GPU 利用率、显存和温度合并为一行，因此在 **44x5** 下就能显示全部三行（此时 footer 自动省略）：
 
 ```text
- host up 11d 16h                   10:42:09
- load 0.14 0.37 0.36  cpu 2/2028  gpu 4
+ host 10.0.0.5 up 11d 16h          10:53:49
+ load 0.14 0.37 0.36  cpu 2/2028  gpu 1
  CPU  [||||||||||        ]            53.7%
  MEM  [|||               ]   77/504G(15.3%)
  GPU  [|                 ] 1.2/24G(5%) 34°C
@@ -115,7 +116,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 多张 GPU 而高度不足时（例如 44x5）会退回仅 CPU 和内存两行：
 
 ```text
- host up 11d 16h                   10:42:23
+ host 10.0.0.5 up 11d 16h          10:53:49
  load 0.14 0.37 0.36  cpu 2/2028  gpu 4
  CPU  [|||||||||||         ]          53.7%
  MEM  [|||                 ] 77/504G(15.3%)
