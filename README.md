@@ -5,11 +5,11 @@
 | 指标 | 说明 |
 | --- | --- |
 | **CPU** | 整体利用率与方括号包裹的彩色 `|` 进度条 |
-| **内存** | 物理内存使用率、Cache/Buffers、Swap |
+| **内存** | 物理内存使用率与实际占用量 |
 | **GPU** | 利用率（检测到 GPU 时显示） |
-| **显存** | 显存占用率（检测到显存信息时显示） |
+| **显存** | 显存占用量与百分比（与 GPU 同一行显示） |
 
-界面为纯 curses 实现，无第三方依赖。每项指标一行：`[|...]` 彩色进度条 + 右对齐的百分比/显存/温度；多 GPU 时每张卡一行。不绘制面板边框和历史曲线。
+界面为纯 curses 实现，无第三方依赖。每项指标一行：`[|...]` 彩色进度条 + 右对齐的百分比/显存/温度；GPU 每张卡一行，单卡时利用率、显存与温度合并到同一行。不绘制面板边框和历史曲线。
 
 ## 快速开始
 
@@ -46,10 +46,10 @@ etop
 
 | 按键 | 作用 |
 | --- | --- |
-| `q` / `Esc` | 退出 |
-| `p` / 空格 | 暂停 / 继续采样 |
-| `+` / `-` | 加快 / 减慢刷新（0.25s 步进，范围 0.25–10s） |
-| `h` / `?` | 帮助 |
+| `q` / `Q` / `Esc` | 退出 |
+| `p` / `P` / 空格 | 暂停 / 继续采样（暂停时 header 显示 `PAUSED`） |
+| `+` / `=` / `-` / `_` | 加快 / 减慢刷新（0.25s 步进，范围 0.25–10s） |
+| `h` / `H` / `?` | 帮助 |
 
 ## 命令行
 
@@ -58,22 +58,23 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
      [--demo] [--no-color] [--ascii] [--version]
 ```
 
-- `-d, --delay`：刷新间隔，默认 1 秒。
-- `--once`：打印一次纯文本快照后退出，适合脚本或非交互环境。
-- `--gpu`：GPU 后端，默认自动探测。
+- `-d, --delay`：刷新间隔，默认 1 秒，超出 0.25–10 秒会被夹到边界值。
+- `--once`：打印一次纯文本快照后退出，适合脚本或非交互环境；GPU 与显存在这里仍分两行输出。
+- `--gpu`：GPU 后端，可选 `auto`、`nvidia`、`sysfs`、`none`，默认自动探测。
 - `--demo`：使用合成 GPU 数据，便于在没有 GPU 的机器上预览 GPU 行。
-- `--no-color` / `--ascii`：关闭颜色（仍使用终端默认背景）/ 使用纯 ASCII 字符。
+- `--no-color` / `--ascii`：关闭颜色（仍使用终端默认背景）/ 使用纯 ASCII 字符（如 `°C` 变为 `C`）。
+- `--version`：打印版本号后退出。
 
 ## 数据来源
 
 - **CPU**：`/proc/stat`，两次采样之间 busy/total 的增量；首帧显示开机以来的平均值。
   `iowait` 计入空闲，与 htop 口径一致。
-- **内存**：`/proc/meminfo`。使用量 = `MemTotal - MemAvailable`，并单独展示 Cache/Buffers 与 Swap。
+- **内存**：`/proc/meminfo`。使用量 = `MemTotal - MemAvailable`，界面显示使用量、总量与使用率。
 - **GPU**：
-  - NVIDIA：`nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu`；
+  - NVIDIA：`nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu`（名称仅用于识别，界面不显示型号）；
   - AMD / 其他 DRM 驱动：`/sys/class/drm/card*/device/gpu_busy_percent`、`mem_info_vram_used`、`mem_info_vram_total`、`hwmon/*/temp1_input`。
   - 未检测到 GPU 时自动隐藏 GPU 与显存行；驱动短暂失败时保留上一帧并标记 `stale`。
-- **IP 地址**：从 `/proc/net/route` 找到目标为 `0.0.0.0` 且处于 UP 状态的默认路由网卡，再用 `SIOCGIFADDR` 读取其 IPv4 地址。
+- **IP 地址**：从 `/proc/net/route` 找到目标为 `0.0.0.0` 且处于 UP 状态的默认路由网卡，再用 `SIOCGIFADDR` 读取其 IPv4 地址（不支持 IPv6 地址显示）。
 - **Load / uptime / tasks**：`os.getloadavg()`、`/proc/uptime`，任务数取自 `/proc/loadavg` 的 `running/total`。
 - **GPU 任务数**：NVIDIA 统计 `nvidia-smi --query-compute-apps=pid` 的唯一 PID 数；sysfs 后端近似统计持有 `/dev/dri` 文件描述符的进程数。
 
@@ -123,7 +124,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
  etop 0.1.0  q quit  p pause  +/-  h help
 ```
 
-空间富余时在底部留白。极紧尺寸下 footer（含版本和快捷键）会自动省略，以保留全部指标行；低于 **44x5** 时显示提示。
+空间富余时在底部留白。极紧尺寸下 footer（含版本和快捷键）会自动省略，以保留全部指标行；高度不足时 GPU 行会被暂时隐藏（只保留 CPU 和内存）。低于 **44x5** 时显示形如 `too small (min 44x5)` 的提示。
 
 ## 测试
 
@@ -131,4 +132,4 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 python3 -m unittest discover -s tests -v
 ```
 
-测试覆盖 `/proc` 解析、NVIDIA CSV 解析、sysfs GPU 采样、布局与格式化。
+测试覆盖 `/proc` 解析、默认路由与 IP 解析、NVIDIA CSV 解析、sysfs GPU 采样、进度条绘制、布局与格式化。
