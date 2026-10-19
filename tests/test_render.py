@@ -224,7 +224,7 @@ class CompactLayoutTests(unittest.TestCase):
         cpu = CpuSample(42.0, (10.0, 20.0), temp=52.0, freq=3200.0)
         mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
         metrics = compact_metrics(cpu, mem, [])
-        self.assertEqual(metrics[0].detail, "2(42.0%) 52°C 3.2GHz")
+        self.assertEqual(metrics[0].detail, "2(42.0%) 3.2GHz 52°C")
 
     def test_cpu_detail_frequency_without_temperature(self):
         cpu = CpuSample(42.0, (10.0, 20.0), freq=3200.0)

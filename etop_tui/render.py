@@ -527,10 +527,10 @@ def compact_metrics(
         else f"{mem.used_pct:.1f}%"
     )
     cpu_detail = f"{len(cpu.cores)}({cpu.total:.1f}%)"
-    if cpu.temp is not None:
-        cpu_detail += " " + _temp_text(cpu.temp, ascii_mode)
     if cpu.freq is not None:
         cpu_detail += " " + _freq_text(cpu.freq)
+    if cpu.temp is not None:
+        cpu_detail += " " + _temp_text(cpu.temp, ascii_mode)
     rows = [
         CompactMetric("CPU", cpu.total, cpu_detail, _cpu_segments(cpu)),
         CompactMetric("MEM", mem.used_pct, mem_suffix, _mem_segments(mem)),

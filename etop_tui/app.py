@@ -274,15 +274,15 @@ def print_once(options: Options) -> None:
         print(line.rstrip())
 
     cpu_extra = ""
-    if sample.temp is not None:
-        cpu_extra = f"{sample.temp:.0f}{'C' if ascii_mode else '°C'}"
     if sample.freq is not None:
         if sample.freq >= 1000:
             ghz = f"{sample.freq / 1000:.1f}".rstrip("0").rstrip(".")
-            freq_text = f"{ghz}GHz"
+            cpu_extra = f"{ghz}GHz"
         else:
-            freq_text = f"{sample.freq:.0f}MHz"
-        cpu_extra = f"{cpu_extra} {freq_text}".strip()
+            cpu_extra = f"{sample.freq:.0f}MHz"
+    if sample.temp is not None:
+        temp_text = f"{sample.temp:.0f}{'C' if ascii_mode else '°C'}"
+        cpu_extra = f"{cpu_extra} {temp_text}".strip()
     row(
         "CPU",
         sample.total,
