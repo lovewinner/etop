@@ -5,8 +5,10 @@ from etop_tui.collect import CpuSample, MemSample
 from etop_tui.gpu import GpuSample
 from etop_tui.render import (
     GIB,
+    Palette,
     Rect,
     compact_bytes,
+    draw_bar,
     compact_layout,
     compact_metrics,
     compact_metrics_for_height,
@@ -35,6 +37,38 @@ class MeterTests(unittest.TestCase):
         self.assertEqual(pipe_parts(100, 10), ("|" * 10, ""))
         self.assertEqual(pipe_parts(1, 100), ("|", " " * 99))
         self.assertEqual(pipe_parts(0.1, 100), ("|", " " * 99))
+
+
+class _Window:
+    """Minimal curses window stub that records drawn characters."""
+
+    def __init__(self, width):
+        self.width = width
+        self.cells = [" "] * width
+
+    def getmaxyx(self):
+        return 1, self.width
+
+    def addstr(self, y, x, text, attr=0):
+        for offset, char in enumerate(text):
+            position = x + offset
+            if 0 <= position < self.width:
+                self.cells[position] = char
+
+    def text(self):
+        return "".join(self.cells).rstrip()
+
+
+class DrawBarTests(unittest.TestCase):
+    def test_bar_is_wrapped_in_brackets(self):
+        win = _Window(20)
+        draw_bar(win, 0, 0, 20, 50.0, Palette(False))
+        self.assertEqual(win.text(), "[|||||||||         ]")
+
+    def test_unknown_value_still_has_brackets(self):
+        win = _Window(10)
+        draw_bar(win, 0, 0, 10, None, Palette(False))
+        self.assertEqual(win.text(), "[        ]")
 
 
 class ColourBandTests(unittest.TestCase):
@@ -111,31 +145,20 @@ class CompactLayoutTests(unittest.TestCase):
         self.assertIsNotNone(compact_layout(6, 44, 4))
         self.assertIsNone(compact_layout(6, 44, 4)[2])
 
-    def test_44x5_hides_gpu(self):
+    def test_44x5_fits_a_single_gpu_row(self):
         cpu = CpuSample(10.0, ())
         mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
         gpu = GpuSample("nvidia", 0, "RTX", 10.0, 2 * GIB, 24 * GIB, 54.0)
-        self.assertEqual(
-            [
-                metric.label
-                for metric in compact_metrics_for_height(5, cpu, mem, [gpu])
-            ],
-            ["CPU", "MEM"],
-        )
-        self.assertEqual(
-            [
-                metric.label
-                for metric in compact_metrics_for_height(6, cpu, mem, [gpu])
-            ],
-            ["CPU", "MEM", "GPU", "VRAM"],
-        )
-        self.assertEqual(
-            [
-                metric.label
-                for metric in compact_metrics_for_height(7, cpu, mem, [gpu])
-            ],
-            ["CPU", "MEM", "GPU", "VRAM"],
-        )
+        for rows in (5, 6, 7):
+            self.assertEqual(
+                [
+                    metric.label
+                    for metric in compact_metrics_for_height(
+                        rows, cpu, mem, [gpu]
+                    )
+                ],
+                ["CPU", "MEM", "GPU"],
+            )
 
     def test_rows_do_not_overlap_footer(self):
         for rows in range(5, 20):
@@ -163,14 +186,13 @@ class CompactLayoutTests(unittest.TestCase):
         gpu = GpuSample("nvidia", 0, "RTX", 21.0, 2 * GIB, 24 * GIB, 54.0)
         metrics = compact_metrics(cpu, mem, [gpu], ascii_mode=False)
         self.assertEqual(
-            [metric.label for metric in metrics], ["CPU", "MEM", "GPU", "VRAM"]
+            [metric.label for metric in metrics], ["CPU", "MEM", "GPU"]
         )
         self.assertAlmostEqual(metrics[0].pct, 42.0)
         self.assertEqual(metrics[0].detail, " 42.0%")
         self.assertEqual(metrics[1].detail, "8.0/16G(50.0%)")
-        self.assertEqual(metrics[2].detail, "54°C")
-        self.assertAlmostEqual(metrics[3].pct, 2 / 24 * 100)
-        self.assertEqual(metrics[3].detail, "2.0/24G(8.3%)")
+        self.assertAlmostEqual(metrics[2].pct, 21.0)
+        self.assertEqual(metrics[2].detail, "2.0/24G(8%) 54°C")
 
     def test_multi_gpu_metrics_have_bars_and_aligned_text(self):
         cpu = CpuSample(10.0, ())

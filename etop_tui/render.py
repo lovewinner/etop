@@ -102,6 +102,9 @@ class Palette:
         if curses.COLORS >= 256:
             # Desaturated xterm-256 shades: sage / straw / sand / dusty red.
             good, warn, orange, bad = 108, 186, 180, 174
+            # Bright sky blue marks the host name without colliding with the
+            # green/yellow/orange/red load bands.
+            host = 117
         else:
             # 8-colour terminals collapse the middle two bands.
             good, warn, orange, bad = (
@@ -110,10 +113,12 @@ class Palette:
                 curses.COLOR_YELLOW,
                 curses.COLOR_RED,
             )
+            host = curses.COLOR_CYAN
         colours = {
             "normal": curses.COLOR_WHITE,
             "label": curses.COLOR_CYAN,
             "title": curses.COLOR_CYAN,
+            "host": host,
             "good": good,
             "warn": warn,
             "orange": orange,
@@ -260,17 +265,31 @@ def draw_bar(
     pal: Palette,
     ascii_mode: bool = False,
 ) -> None:
-    """Draw a '|' utilisation bar without the trailing percentage text."""
+    """Draw a bracketed '|' bar: "[||||      ]"."""
     if width <= 0:
         return
+    if width < 2:
+        # Too narrow for brackets; keep the bare bar.
+        if pct is None:
+            put(win, y, x, " " * width, pal.attr("dim"))
+            return
+        pct = _clamp(pct)
+        filled, empty = pipe_parts(pct, width)
+        put(win, y, x, filled, pal.level_attr(pct))
+        put(win, y, x + len(filled), empty, pal.attr("dim"))
+        return
+
+    inner = width - 2
+    put(win, y, x, "[", pal.attr("dim"))
+    put(win, y, x + width - 1, "]", pal.attr("dim"))
     if pct is None:
-        put(win, y, x, " " * width, pal.attr("dim"))
+        put(win, y, x + 1, " " * inner, pal.attr("dim"))
         return
     pct = _clamp(pct)
-    filled, empty = pipe_parts(pct, width)
+    filled, empty = pipe_parts(pct, inner)
     attr = pal.level_attr(pct)
-    put(win, y, x, filled, attr)
-    put(win, y, x + len(filled), empty, pal.attr("dim"))
+    put(win, y, x + 1, filled, attr)
+    put(win, y, x + 1 + len(filled), empty, pal.attr("dim"))
 
 
 def _temp_text(temp: Optional[float], ascii_mode: bool) -> str:
@@ -281,17 +300,35 @@ def _temp_text(temp: Optional[float], ascii_mode: bool) -> str:
 
 
 def _gpu_suffixes(
-    gpus: Sequence[GpuSample], ascii_mode: bool
+    gpus: Sequence[GpuSample], ascii_mode: bool, align: bool = True
 ) -> List[str]:
-    """Right-hand text for each GPU: '12.3/24G(51%) 54°C'."""
+    """Right-hand text for each GPU: '12.3/24G(51%) 54°C'.
+
+    With several cards the columns are padded so temperatures line up. A
+    single card keeps the natural one-space spacing instead.
+    """
     mem_texts = [compact_bytes(gpu.mem_used, gpu.mem_total) for gpu in gpus]
-    mem_width = max((len(text) for text in mem_texts), default=0)
     temp_texts = [_temp_text(gpu.temp, ascii_mode) for gpu in gpus]
-    temp_width = max((len(text) for text in temp_texts), default=0)
     pct_texts = [
         "" if gpu.mem_pct is None else f"({gpu.mem_pct:.0f}%)" for gpu in gpus
     ]
     has_vram_pct = any(pct_texts)
+    if not align:
+        suffixes = []
+        for index, gpu in enumerate(gpus):
+            parts = []
+            if mem_texts[index] or pct_texts[index]:
+                parts.append(mem_texts[index] + pct_texts[index])
+            if temp_texts[index]:
+                parts.append(temp_texts[index])
+            suffix = " ".join(parts)
+            if gpu.stale:
+                suffix = f"{suffix} *".strip()
+            suffixes.append(suffix)
+        return suffixes
+
+    mem_width = max((len(text) for text in mem_texts), default=0)
+    temp_width = max((len(text) for text in temp_texts), default=0)
 
     suffixes = []
     for index, gpu in enumerate(gpus):
@@ -332,7 +369,7 @@ def draw_header(
     uptime_text = f"up {format_uptime(uptime)}"
     clock = " " + time.strftime("%H:%M:%S") + " "
 
-    put(win, rect.y, 0, left, pal.attr("title", bold=True))
+    put(win, rect.y, 0, left, pal.attr("host", bold=True))
     if rect.w >= len(clock):
         put(win, rect.y, rect.w - len(clock), clock, pal.attr("dim"))
     start = len(left) + 1
@@ -391,25 +428,13 @@ def compact_metrics(
         CompactMetric("CPU", cpu.total, f"{cpu.total:5.1f}%"),
         CompactMetric("MEM", mem.used_pct, mem_suffix),
     ]
-    if len(gpus) > 1:
-        suffixes = _gpu_suffixes(gpus, ascii_mode)
-        for index, gpu in enumerate(gpus):
-            rows.append(
-                CompactMetric(f"GPU{gpu.index}", gpu.util, suffixes[index])
-            )
-        return rows
     if gpus:
-        primary = gpus[0]
-        detail = _temp_text(primary.temp, ascii_mode)
-        if primary.stale:
-            detail = f"{detail} *".strip()
-        rows.append(CompactMetric("GPU", primary.util, detail))
-    if gpus and gpus[0].mem_total:
-        primary = gpus[0]
-        detail = compact_bytes(primary.mem_used, primary.mem_total)
-        if primary.mem_pct is not None and detail:
-            detail = f"{detail}({primary.mem_pct:.1f}%)"
-        rows.append(CompactMetric("VRAM", primary.mem_pct, detail))
+        # Every GPU, including a single card, gets one row that combines
+        # utilisation, VRAM and temperature: "12.3/24G(51%) 54°C".
+        suffixes = _gpu_suffixes(gpus, ascii_mode, align=len(gpus) > 1)
+        for index, gpu in enumerate(gpus):
+            label = "GPU" if len(gpus) == 1 else f"GPU{gpu.index}"
+            rows.append(CompactMetric(label, gpu.util, suffixes[index]))
     return rows
 
 
