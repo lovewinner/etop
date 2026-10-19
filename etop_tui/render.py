@@ -360,6 +360,16 @@ def _temp_text(temp: Optional[float], ascii_mode: bool) -> str:
     return f"{temp:.0f}{unit}"
 
 
+def _freq_text(freq: Optional[float]) -> str:
+    """Format a frequency in MHz as '3.2GHz' or '800MHz'."""
+    if freq is None:
+        return ""
+    if freq >= 1000:
+        ghz = f"{freq / 1000:.1f}".rstrip("0").rstrip(".")
+        return f"{ghz}GHz"
+    return f"{freq:.0f}MHz"
+
+
 def _gpu_suffixes(
     gpus: Sequence[GpuSample], ascii_mode: bool, align: bool = True
 ) -> List[str]:
@@ -519,6 +529,8 @@ def compact_metrics(
     cpu_detail = f"{len(cpu.cores)}({cpu.total:.1f}%)"
     if cpu.temp is not None:
         cpu_detail += " " + _temp_text(cpu.temp, ascii_mode)
+    if cpu.freq is not None:
+        cpu_detail += " " + _freq_text(cpu.freq)
     rows = [
         CompactMetric("CPU", cpu.total, cpu_detail, _cpu_segments(cpu)),
         CompactMetric("MEM", mem.used_pct, mem_suffix, _mem_segments(mem)),

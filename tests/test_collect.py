@@ -5,6 +5,7 @@ from pathlib import Path
 from etop_tui.collect import (
     CpuCollector,
     MemSample,
+    read_cpu_freq,
     read_cpu_temp,
     read_cpu_times,
     read_default_ipv4,
@@ -87,6 +88,14 @@ class CpuCollectorTests(unittest.TestCase):
             collector = CpuCollector(str(path), temp_reader=lambda: 52.0)
             sample = collector.sample()
         self.assertEqual(sample.temp, 52.0)
+
+    def test_freq_flows_into_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "stat"
+            path.write_text(STAT_A)
+            collector = CpuCollector(str(path), freq_reader=lambda: 3200.0)
+            sample = collector.sample()
+        self.assertEqual(sample.freq, 3200.0)
 
     def test_read_aggregate(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -179,6 +188,50 @@ class CpuTempTests(unittest.TestCase):
             read_cpu_temp(
                 hwmon_root="/nonexistent/hwmon",
                 thermal_root="/nonexistent/thermal",
+            )
+        )
+
+
+class CpuFreqTests(unittest.TestCase):
+    def _cpufreq(self, root: Path, index: int, khz: int) -> None:
+        cpufreq = root / f"cpu{index}" / "cpufreq"
+        cpufreq.mkdir(parents=True)
+        (cpufreq / "scaling_cur_freq").write_text(f"{khz}\n")
+
+    def test_reads_highest_scaling_cur_freq(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._cpufreq(root, 0, 2800000)
+            self._cpufreq(root, 1, 3200000)
+            self.assertEqual(
+                read_cpu_freq(
+                    cpufreq_root=str(root), cpuinfo_path="/nonexistent"
+                ),
+                3200.0,
+            )
+
+    def test_cpuinfo_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cpuinfo = root / "cpuinfo"
+            cpuinfo.write_text(
+                "processor\t: 0\n"
+                "cpu MHz\t\t: 2399.998\n"
+                "processor\t: 1\n"
+                "cpu MHz\t\t: 2399.998\n"
+            )
+            self.assertEqual(
+                read_cpu_freq(
+                    cpufreq_root=str(root), cpuinfo_path=str(cpuinfo)
+                ),
+                2399.998,
+            )
+
+    def test_missing_sources(self):
+        self.assertIsNone(
+            read_cpu_freq(
+                cpufreq_root="/nonexistent/cpu",
+                cpuinfo_path="/nonexistent/cpuinfo",
             )
         )
 

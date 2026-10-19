@@ -60,6 +60,8 @@ class CpuSample:
     iowait: float = 0.0
     # Hottest CPU sensor in °C, or None on machines without sensors (VMs).
     temp: Optional[float] = None
+    # Highest current CPU frequency in MHz, or None when unavailable.
+    freq: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -244,6 +246,45 @@ def read_cpu_temp(
     return max(temps) if temps else None
 
 
+def read_cpu_freq(
+    cpufreq_root: str = "/sys/devices/system/cpu",
+    cpuinfo_path: str = "/proc/cpuinfo",
+) -> Optional[float]:
+    """Return the highest current CPU frequency in MHz, or None.
+
+    Prefers the cpufreq sysfs counters (live, per core); falls back to the
+    nominal "cpu MHz" lines in /proc/cpuinfo, which most VMs expose.
+    """
+    freqs: List[float] = []
+    for cpu_dir in sorted(glob.glob(os.path.join(cpufreq_root, "cpu[0-9]*"))):
+        text = _read_text(os.path.join(cpu_dir, "cpufreq", "scaling_cur_freq"))
+        if text is None:
+            continue
+        try:
+            khz = int(text)
+        except ValueError:
+            continue
+        if khz > 0:
+            freqs.append(khz / 1000.0)
+    if freqs:
+        return max(freqs)
+    try:
+        with open(cpuinfo_path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.startswith("cpu MHz"):
+                    continue
+                _, _, value = line.partition(":")
+                try:
+                    mhz = float(value)
+                except ValueError:
+                    continue
+                if mhz > 0:
+                    freqs.append(mhz)
+    except OSError:
+        return None
+    return max(freqs) if freqs else None
+
+
 class CpuCollector:
     """Stateful CPU sampler; percentages are deltas between calls."""
 
@@ -251,9 +292,11 @@ class CpuCollector:
         self,
         path: str = "/proc/stat",
         temp_reader: Optional[Callable[[], Optional[float]]] = None,
+        freq_reader: Optional[Callable[[], Optional[float]]] = None,
     ) -> None:
         self._path = path
         self._temp_reader = temp_reader or read_cpu_temp
+        self._freq_reader = freq_reader or read_cpu_freq
         self._previous: Optional[Tuple[CpuTimes, List[CpuTimes]]] = None
 
     def sample(self) -> CpuSample:
@@ -283,7 +326,11 @@ class CpuCollector:
         breakdown = _category_percentages(previous_overall, overall)
         self._previous = (overall, cores)
         return CpuSample(
-            total, per_core, *breakdown, temp=self._temp_reader()
+            total,
+            per_core,
+            *breakdown,
+            temp=self._temp_reader(),
+            freq=self._freq_reader(),
         )
 
 
