@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import curses
+import math
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -105,6 +106,11 @@ class Palette:
             # Bright sky blue marks the host name without colliding with the
             # green/yellow/orange/red load bands.
             host = 117
+            cpu_nice = 110
+            cpu_irq = 180
+            cpu_steal = 141
+            mem_buffers = 110
+            mem_cache = 186
         else:
             # 8-colour terminals collapse the middle two bands.
             good, warn, orange, bad = (
@@ -114,6 +120,11 @@ class Palette:
                 curses.COLOR_RED,
             )
             host = curses.COLOR_CYAN
+            cpu_nice = curses.COLOR_BLUE
+            cpu_irq = curses.COLOR_YELLOW
+            cpu_steal = curses.COLOR_MAGENTA
+            mem_buffers = curses.COLOR_BLUE
+            mem_cache = curses.COLOR_YELLOW
         colours = {
             "normal": curses.COLOR_WHITE,
             "label": curses.COLOR_CYAN,
@@ -124,6 +135,14 @@ class Palette:
             "orange": orange,
             "bad": bad,
             "accent": curses.COLOR_MAGENTA,
+            "cpu_user": good,
+            "cpu_nice": cpu_nice,
+            "cpu_system": bad,
+            "cpu_irq": cpu_irq,
+            "cpu_steal": cpu_steal,
+            "mem_used": good,
+            "mem_buffers": mem_buffers,
+            "mem_cache": mem_cache,
         }
         for index, (name, foreground) in enumerate(colours.items(), start=1):
             try:
@@ -256,6 +275,33 @@ def pipe_parts(pct: float, width: int) -> Tuple[str, str]:
     return "|" * filled_count, " " * (width - filled_count)
 
 
+_SEGMENT_CHARS = "|#*@$%&"
+
+
+def _draw_segments(
+    win,
+    y: int,
+    x: int,
+    width: int,
+    segments: Sequence[Tuple[float, str]],
+    pal: Palette,
+) -> None:
+    """Draw stacked segments left to right, each with its own colour."""
+    offset = 0
+    for index, (value, colour) in enumerate(segments):
+        if offset >= width:
+            break
+        cells = int(math.ceil(max(0.0, value) / 100.0 * width))
+        cells = min(max(0, cells), width - offset)
+        if cells <= 0:
+            continue
+        glyph = "|" if pal.color else _SEGMENT_CHARS[index % len(_SEGMENT_CHARS)]
+        put(win, y, x + offset, glyph * cells, pal.attr(colour))
+        offset += cells
+    if offset < width:
+        put(win, y, x + offset, " " * (width - offset), pal.attr("dim"))
+
+
 def draw_bar(
     win,
     y: int,
@@ -264,8 +310,13 @@ def draw_bar(
     pct: Optional[float],
     pal: Palette,
     ascii_mode: bool = False,
+    segments: Sequence[Tuple[float, str]] = (),
 ) -> None:
-    """Draw a bracketed '|' bar: "[||||      ]"."""
+    """Draw a bracketed bar: "[||||      ]".
+
+    With *segments* each slice gets its own colour (CPU time split, memory
+    classes); otherwise the whole bar uses the load-band colour of *pct*.
+    """
     if width <= 0:
         return
     if width < 2:
@@ -282,6 +333,9 @@ def draw_bar(
     inner = width - 2
     put(win, y, x, "[", pal.attr("dim"))
     put(win, y, x + width - 1, "]", pal.attr("dim"))
+    if segments:
+        _draw_segments(win, y, x + 1, inner, segments, pal)
+        return
     if pct is None:
         put(win, y, x + 1, " " * inner, pal.attr("dim"))
         return
@@ -414,6 +468,30 @@ class CompactMetric:
     label: str
     pct: Optional[float]
     detail: str = ""
+    segments: Tuple[Tuple[float, str], ...] = ()
+
+
+def _cpu_segments(cpu: CpuSample) -> Tuple[Tuple[float, str], ...]:
+    parts = (
+        (cpu.user, "cpu_user"),
+        (cpu.nice, "cpu_nice"),
+        (cpu.system, "cpu_system"),
+        (cpu.irq, "cpu_irq"),
+        (cpu.steal, "cpu_steal"),
+    )
+    return tuple((value, colour) for value, colour in parts if value > 0)
+
+
+def _mem_segments(mem: MemSample) -> Tuple[Tuple[float, str], ...]:
+    if not mem.total:
+        return ()
+    scale = 100.0 / mem.total
+    parts = (
+        (mem.used * scale, "mem_used"),
+        (mem.buffers * scale, "mem_buffers"),
+        (mem.cached * scale, "mem_cache"),
+    )
+    return tuple((value, colour) for value, colour in parts if value > 0)
 
 
 def compact_metrics(
@@ -430,8 +508,10 @@ def compact_metrics(
         else f"{mem.used_pct:.1f}%"
     )
     rows = [
-        CompactMetric("CPU", cpu.total, f"{cpu.total:5.1f}%"),
-        CompactMetric("MEM", mem.used_pct, mem_suffix),
+        CompactMetric(
+            "CPU", cpu.total, f"{cpu.total:5.1f}%", _cpu_segments(cpu)
+        ),
+        CompactMetric("MEM", mem.used_pct, mem_suffix, _mem_segments(mem)),
     ]
     if gpus:
         # Every GPU, including a single card, gets one row that combines
@@ -535,6 +615,7 @@ def draw_compact(
             metric.pct,
             pal,
             ascii_mode,
+            metric.segments,
         )
         if metric.detail:
             put(

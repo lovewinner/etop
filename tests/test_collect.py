@@ -55,6 +55,11 @@ class CpuCollectorTests(unittest.TestCase):
         self.assertEqual(len(sample.cores), 2)
         self.assertAlmostEqual(sample.cores[0], 20.0)
         self.assertAlmostEqual(sample.cores[1], 10.0)
+        self.assertAlmostEqual(sample.user, 10.0)
+        self.assertAlmostEqual(sample.nice, 0.0)
+        self.assertAlmostEqual(sample.system, 10.0)
+        self.assertAlmostEqual(sample.irq, 0.0)
+        self.assertAlmostEqual(sample.steal, 0.0)
 
     def test_delta_between_samples(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -67,6 +72,8 @@ class CpuCollectorTests(unittest.TestCase):
         self.assertAlmostEqual(sample.total, 50.0)  # 100 busy / 200 total
         self.assertAlmostEqual(sample.cores[0], 50.0)
         self.assertAlmostEqual(sample.cores[1], 50 / 150 * 100)
+        self.assertAlmostEqual(sample.user, 50.0)  # +100 user / 200 total
+        self.assertAlmostEqual(sample.system, 0.0)
 
     def test_read_aggregate(self):
         with tempfile.TemporaryDirectory() as directory:

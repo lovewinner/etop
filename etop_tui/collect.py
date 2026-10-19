@@ -46,6 +46,14 @@ class CpuTimes:
 class CpuSample:
     total: float
     cores: Tuple[float, ...]
+    # Breakdown of busy time as percentages of the same interval. The values
+    # sum to approximately `total`; idle and iowait are intentionally left
+    # out because they are not drawn in the CPU bar.
+    user: float = 0.0
+    nice: float = 0.0
+    system: float = 0.0
+    irq: float = 0.0
+    steal: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -116,6 +124,37 @@ def _utilisation(previous: CpuTimes, current: CpuTimes) -> float:
     return max(0.0, min(100.0, 100.0 * delta_busy / delta_total))
 
 
+def _category_percentages(
+    previous: Optional[CpuTimes], current: CpuTimes
+) -> Tuple[float, float, float, float, float]:
+    """Split busy CPU time into user/nice/system/irq/steal percentages."""
+    if previous is None:
+        total = current.total
+        user, nice = current.user, current.nice
+        system = current.system
+        irq = current.irq + current.softirq
+        steal = current.steal
+    else:
+        total = current.total - previous.total
+        user = current.user - previous.user
+        nice = current.nice - previous.nice
+        system = current.system - previous.system
+        irq = (current.irq + current.softirq) - (
+            previous.irq + previous.softirq
+        )
+        steal = current.steal - previous.steal
+    if total <= 0:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+    scale = 100.0 / total
+    return (
+        max(0.0, user * scale),
+        max(0.0, nice * scale),
+        max(0.0, system * scale),
+        max(0.0, irq * scale),
+        max(0.0, steal * scale),
+    )
+
+
 class CpuCollector:
     """Stateful CPU sampler; percentages are deltas between calls."""
 
@@ -125,6 +164,7 @@ class CpuCollector:
 
     def sample(self) -> CpuSample:
         overall, cores = read_cpu_times(self._path)
+        previous_overall = self._previous[0] if self._previous else None
         if self._previous is None:
             # First frame: report the average since boot rather than 0%.
             total = 100.0 * overall.busy / overall.total if overall.total else 0.0
@@ -146,8 +186,9 @@ class CpuCollector:
                     100.0 * times.busy / times.total if times.total else 0.0
                     for times in cores
                 )
+        breakdown = _category_percentages(previous_overall, overall)
         self._previous = (overall, cores)
-        return CpuSample(total, per_core)
+        return CpuSample(total, per_core, *breakdown)
 
 
 _MEMINFO_FIELDS = {

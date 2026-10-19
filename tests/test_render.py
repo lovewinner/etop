@@ -70,6 +70,19 @@ class DrawBarTests(unittest.TestCase):
         draw_bar(win, 0, 0, 10, None, Palette(False))
         self.assertEqual(win.text(), "[        ]")
 
+    def test_segments_get_distinct_monochrome_glyphs(self):
+        win = _Window(20)
+        draw_bar(
+            win,
+            0,
+            0,
+            20,
+            50.0,
+            Palette(False),
+            segments=((25.0, "cpu_user"), (25.0, "cpu_system")),
+        )
+        self.assertEqual(win.text(), "[" + "|" * 5 + "#" * 5 + " " * 8 + "]")
+
 
 class ColourBandTests(unittest.TestCase):
     def test_thresholds(self):
@@ -193,6 +206,35 @@ class CompactLayoutTests(unittest.TestCase):
         self.assertEqual(metrics[1].detail, "8.0/16G(50.0%)")
         self.assertAlmostEqual(metrics[2].pct, 21.0)
         self.assertEqual(metrics[2].detail, "2.0/24G(8%) 54°C")
+
+    def test_cpu_and_memory_segments(self):
+        cpu = CpuSample(
+            60.0, (), user=30.0, nice=5.0, system=20.0, irq=3.0, steal=2.0
+        )
+        mem = MemSample(
+            total=100 * GIB,
+            free=1,
+            available=40 * GIB,
+            buffers=10 * GIB,
+            cached=20 * GIB,
+            swap_total=0,
+            swap_free=0,
+        )
+        metrics = compact_metrics(cpu, mem, [])
+        self.assertEqual(
+            metrics[0].segments,
+            (
+                (30.0, "cpu_user"),
+                (5.0, "cpu_nice"),
+                (20.0, "cpu_system"),
+                (3.0, "cpu_irq"),
+                (2.0, "cpu_steal"),
+            ),
+        )
+        self.assertEqual(
+            metrics[1].segments,
+            ((60.0, "mem_used"), (10.0, "mem_buffers"), (20.0, "mem_cache")),
+        )
 
     def test_multi_gpu_metrics_have_bars_and_aligned_text(self):
         cpu = CpuSample(10.0, ())
