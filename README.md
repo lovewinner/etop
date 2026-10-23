@@ -1,4 +1,5 @@
 # etop
+<img width="1033" height="793" alt="image" src="https://github.com/user-attachments/assets/afcfd191-9cc0-4776-a475-8d050f99cd72" />
 
 一个类似 htop 的极简终端监控工具，只关注四项实时利用率：
 
