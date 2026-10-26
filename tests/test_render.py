@@ -159,7 +159,7 @@ class CompactLayoutTests(unittest.TestCase):
         self.assertIsNone(compact_layout(6, 44, 4)[2])
 
     def test_44x5_fits_a_single_gpu_row(self):
-        cpu = CpuSample(10.0, ())
+        cpu = CpuSample(10.0, 4)
         mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
         gpu = GpuSample("nvidia", 0, "RTX", 10.0, 2 * GIB, 24 * GIB, 54.0)
         for rows in (5, 6, 7):
@@ -170,7 +170,7 @@ class CompactLayoutTests(unittest.TestCase):
                         rows, cpu, mem, [gpu]
                     )
                 ],
-                ["CPU", "MEM", "GPU"],
+                ["CPU(4)", "MEM(8G)", "GPU"],
             )
 
     def test_rows_do_not_overlap_footer(self):
@@ -186,7 +186,7 @@ class CompactLayoutTests(unittest.TestCase):
                     self.assertLessEqual(start + count - 1, footer.y - 1)
 
     def test_metrics(self):
-        cpu = CpuSample(42.0, (10.0, 20.0))
+        cpu = CpuSample(42.0, 2)
         mem = MemSample(
             total=16 * GIB,
             free=4 * GIB,
@@ -200,37 +200,40 @@ class CompactLayoutTests(unittest.TestCase):
         gpu = GpuSample("nvidia", 0, "RTX", 21.0, 2 * GIB, 24 * GIB, 54.0)
         metrics = compact_metrics(cpu, mem, [gpu], ascii_mode=False)
         self.assertEqual(
-            [metric.label for metric in metrics], ["CPU", "MEM", "GPU"]
+            [metric.label for metric in metrics],
+            ["CPU(2)", "MEM(16G)", "GPU"],
         )
         self.assertAlmostEqual(metrics[0].pct, 42.0)
-        self.assertEqual(metrics[0].detail, "2(42.0%)")
-        self.assertEqual(metrics[1].detail, "8.0/16G(50.0%)")
+        self.assertEqual(metrics[0].detail, "42.0%")
+        self.assertEqual(metrics[1].detail, "50.0%")
         self.assertAlmostEqual(metrics[2].pct, 21.0)
-        self.assertEqual(metrics[2].detail, "2.0/24G(8%) 54°C")
+        self.assertEqual(metrics[2].detail, "21% 2.0/24G(8%) 54°C")
 
     def test_cpu_detail_includes_temperature(self):
-        cpu = CpuSample(42.0, (10.0, 20.0), temp=52.0)
+        cpu = CpuSample(42.0, 2, temp=52.0)
         mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
         metrics = compact_metrics(cpu, mem, [])
-        self.assertEqual(metrics[0].detail, "2(42.0%) 52°C")
+        self.assertEqual(metrics[0].label, "CPU(2)")
+        self.assertEqual(metrics[0].detail, "42.0% 52°C")
 
     def test_cpu_detail_without_temperature(self):
-        cpu = CpuSample(42.0, (10.0, 20.0))
+        cpu = CpuSample(42.0, 2)
         mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
         metrics = compact_metrics(cpu, mem, [])
-        self.assertEqual(metrics[0].detail, "2(42.0%)")
+        self.assertEqual(metrics[0].label, "CPU(2)")
+        self.assertEqual(metrics[0].detail, "42.0%")
 
     def test_cpu_detail_includes_frequency(self):
-        cpu = CpuSample(42.0, (10.0, 20.0), temp=52.0, freq=3200.0)
+        cpu = CpuSample(42.0, 2, temp=52.0, freq=3200.0)
         mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
         metrics = compact_metrics(cpu, mem, [])
-        self.assertEqual(metrics[0].detail, "2(42.0%) 3.2GHz 52°C")
+        self.assertEqual(metrics[0].detail, "42.0% 3.2GHz 52°C")
 
     def test_cpu_detail_frequency_without_temperature(self):
-        cpu = CpuSample(42.0, (10.0, 20.0), freq=3200.0)
+        cpu = CpuSample(42.0, 2, freq=3200.0)
         mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
         metrics = compact_metrics(cpu, mem, [])
-        self.assertEqual(metrics[0].detail, "2(42.0%) 3.2GHz")
+        self.assertEqual(metrics[0].detail, "42.0% 3.2GHz")
 
     def test_freq_text_formatting(self):
         self.assertEqual(_freq_text(3200.0), "3.2GHz")
@@ -242,7 +245,7 @@ class CompactLayoutTests(unittest.TestCase):
     def test_cpu_and_memory_segments(self):
         cpu = CpuSample(
             65.0,
-            (),
+            4,
             user=30.0,
             nice=5.0,
             system=20.0,
@@ -282,10 +285,56 @@ class CompactLayoutTests(unittest.TestCase):
             ),
         )
         self.assertAlmostEqual(metrics[1].pct, 60.0)
-        self.assertEqual(metrics[1].detail, "60/100G(60.0%)")
+        self.assertEqual(metrics[1].label, "MEM(100G)")
+        self.assertEqual(metrics[1].detail, "60.0%")
+
+    def test_gpu_label_includes_core_count(self):
+        cpu = CpuSample(10.0, 4)
+        mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
+        gpu = GpuSample(
+            "nvidia", 0, "RTX 4090", 93.0, 2 * GIB, 24 * GIB, 54.0,
+            cores=16384,
+        )
+        metrics = compact_metrics(cpu, mem, [gpu])
+        self.assertEqual(metrics[2].label, "GPU(16384)")
+        self.assertEqual(metrics[2].detail, "93% 2.0/24G(8%) 54°C")
+
+    def test_gpu_label_without_cores(self):
+        cpu = CpuSample(10.0, 4)
+        mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
+        gpu = GpuSample("nvidia", 0, "RTX", 93.0, 2 * GIB, 24 * GIB, 54.0)
+        metrics = compact_metrics(cpu, mem, [gpu])
+        self.assertEqual(metrics[2].label, "GPU")
+        self.assertEqual(metrics[2].detail, "93% 2.0/24G(8%) 54°C")
+
+    def test_multi_gpu_labels_and_alignment(self):
+        cpu = CpuSample(10.0, 4)
+        mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
+        gpus = [
+            GpuSample(
+                "nvidia", 0, "RTX 4090", 42.0, 2 * GIB, 24 * GIB, 54.0,
+                cores=16384,
+            ),
+            GpuSample(
+                "nvidia", 1, "RTX 4080", 87.0, 19 * GIB, 24 * GIB, 61.0,
+                cores=9728,
+            ),
+        ]
+        metrics = compact_metrics(cpu, mem, gpus)
+        self.assertEqual(
+            [metric.label for metric in metrics[2:]],
+            ["GPU0(16384)", "GPU1(9728)"],
+        )
+        self.assertEqual(
+            [metric.detail for metric in metrics[2:]],
+            ["42%  2.0/24G(8%)  54°C", "87% 19.0/24G(79%) 61°C"],
+        )
+        self.assertEqual(
+            len(metrics[2].detail), len(metrics[3].detail)
+        )
 
     def test_multi_gpu_metrics_have_bars_and_aligned_text(self):
-        cpu = CpuSample(10.0, ())
+        cpu = CpuSample(10.0, 4)
         mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
         gpus = [
             GpuSample("nvidia", 0, "RTX 4090", 42.0, 2 * GIB, 24 * GIB, 54.0),
@@ -294,7 +343,7 @@ class CompactLayoutTests(unittest.TestCase):
         metrics = compact_metrics(cpu, mem, gpus, ascii_mode=False)
         self.assertEqual(
             [metric.label for metric in metrics],
-            ["CPU", "MEM", "GPU0", "GPU1"],
+            ["CPU(4)", "MEM(8G)", "GPU0", "GPU1"],
         )
         self.assertIn("2.0/24G(8%)", metrics[2].detail)
         self.assertIn("54°C", metrics[2].detail)
@@ -304,21 +353,23 @@ class CompactLayoutTests(unittest.TestCase):
         self.assertEqual(len(metrics[2].detail), len(metrics[3].detail))
 
     def test_metrics_without_gpu(self):
-        cpu = CpuSample(10.0, ())
+        cpu = CpuSample(10.0, 4)
         mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
         self.assertEqual(
             [metric.label for metric in compact_metrics(cpu, mem, [])],
-            ["CPU", "MEM"],
+            ["CPU(4)", "MEM(8G)"],
         )
 
     def test_gpu_without_vram(self):
-        cpu = CpuSample(10.0, ())
+        cpu = CpuSample(10.0, 4)
         mem = MemSample(8 * GIB, 1, 4 * GIB, 0, 0, 0, 0)
         gpu = GpuSample("nvidia", 0, "RTX", 10.0, None, None, None)
+        metrics = compact_metrics(cpu, mem, [gpu])
         self.assertEqual(
-            [metric.label for metric in compact_metrics(cpu, mem, [gpu])],
-            ["CPU", "MEM", "GPU"],
+            [metric.label for metric in metrics],
+            ["CPU(4)", "MEM(8G)", "GPU"],
         )
+        self.assertEqual(metrics[2].detail, "10%")
 
     def test_compact_bytes(self):
         self.assertEqual(compact_bytes(None, 2 * GIB), "")

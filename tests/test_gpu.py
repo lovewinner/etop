@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from etop_tui.gpu import (
     GpuMonitor,
@@ -8,6 +9,7 @@ from etop_tui.gpu import (
     SysfsGpuBackend,
     parse_nvidia_csv,
     parse_nvidia_task_pids,
+    read_nvidia_gpu_cores,
 )
 
 NVIDIA_CSV = """0, NVIDIA GeForce RTX 4090, 42, 1234, 24564, 54
@@ -37,10 +39,67 @@ class NvidiaParseTests(unittest.TestCase):
         self.assertEqual(parse_nvidia_csv(""), [])
         self.assertEqual(parse_nvidia_csv("not,a,gpu"), [])
 
+    def test_cores_default_to_none(self):
+        gpus = parse_nvidia_csv(NVIDIA_CSV)
+        self.assertIsNone(gpus[0].cores)
+
     def test_task_pids(self):
         self.assertEqual(parse_nvidia_task_pids("123\n456\n123\n"), 2)
         self.assertEqual(parse_nvidia_task_pids(""), 0)
         self.assertEqual(parse_nvidia_task_pids("N/A\n"), 0)
+
+
+class _FakeNvml:
+    """Minimal stand-in for libnvidia-ml driven through ctypes byref."""
+
+    def __init__(self, cores, init_result=0, cores_result=0):
+        self._cores = cores
+        self._init_result = init_result
+        self._cores_result = cores_result
+
+    def nvmlInit_v2(self):
+        return self._init_result
+
+    def nvmlDeviceGetHandleByIndex(self, index, out):
+        if index not in self._cores:
+            return 2  # NVML_ERROR_NOT_SUPPORTED-ish: stop enumerating
+        out._obj.value = index + 100
+        return 0
+
+    def nvmlDeviceGetNumGpuCores(self, handle, out):
+        if self._cores_result != 0:
+            return self._cores_result
+        # ctypes hands the c_void_p through unchanged to Python callables.
+        index = getattr(handle, "value", handle) - 100
+        out._obj.value = self._cores[index]
+        return 0
+
+    def nvmlShutdown(self):
+        return 0
+
+
+class NvmlCoreTests(unittest.TestCase):
+    def test_reads_core_counts_per_index(self):
+        fake = _FakeNvml({0: 16384, 1: 9728})
+        self.assertEqual(
+            read_nvidia_gpu_cores(library=fake), {0: 16384, 1: 9728}
+        )
+
+    def test_init_failure_returns_empty(self):
+        fake = _FakeNvml({0: 16384}, init_result=1)
+        self.assertEqual(read_nvidia_gpu_cores(library=fake), {})
+
+    def test_core_query_failure_skips_gpu(self):
+        fake = _FakeNvml({0: 16384}, cores_result=3)
+        self.assertEqual(read_nvidia_gpu_cores(library=fake), {})
+
+    def test_missing_library_returns_empty(self):
+        with mock.patch("etop_tui.gpu._nvml_library", return_value=None):
+            self.assertEqual(read_nvidia_gpu_cores(), {})
+
+    def test_no_library_on_this_machine(self):
+        # Whatever the host exposes, the call must never raise.
+        self.assertIsInstance(read_nvidia_gpu_cores(), dict)
 
 
 class SysfsTests(unittest.TestCase):

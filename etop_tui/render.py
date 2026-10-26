@@ -370,24 +370,36 @@ def _freq_text(freq: Optional[float]) -> str:
     return f"{freq:.0f}MHz"
 
 
+def _gpu_util_text(gpu: GpuSample) -> str:
+    """'93%' when the utilisation is known, else ''."""
+    if gpu.util is None:
+        return ""
+    return f"{gpu.util:.0f}%"
+
+
 def _gpu_suffixes(
     gpus: Sequence[GpuSample], ascii_mode: bool, align: bool = True
 ) -> List[str]:
-    """Right-hand text for each GPU: '12.3/24G(51%) 54°C'.
+    """Right-hand text for each GPU: '79% 12.3/24G(51%) 54°C'.
 
-    With several cards the columns are padded so temperatures line up. A
-    single card keeps the natural one-space spacing instead.
+    The bare percentage is GPU utilisation; the parenthesised one after the
+    VRAM pair is the VRAM occupancy. With several cards the columns are
+    padded so temperatures line up. A single card keeps the natural
+    one-space spacing instead.
     """
     mem_texts = [compact_bytes(gpu.mem_used, gpu.mem_total) for gpu in gpus]
     temp_texts = [_temp_text(gpu.temp, ascii_mode) for gpu in gpus]
     pct_texts = [
         "" if gpu.mem_pct is None else f"({gpu.mem_pct:.0f}%)" for gpu in gpus
     ]
+    util_texts = [_gpu_util_text(gpu) for gpu in gpus]
     has_vram_pct = any(pct_texts)
     if not align:
         suffixes = []
         for index, gpu in enumerate(gpus):
             parts = []
+            if util_texts[index]:
+                parts.append(util_texts[index])
             if mem_texts[index] or pct_texts[index]:
                 parts.append(mem_texts[index] + pct_texts[index])
             if temp_texts[index]:
@@ -400,10 +412,15 @@ def _gpu_suffixes(
 
     mem_width = max((len(text) for text in mem_texts), default=0)
     temp_width = max((len(text) for text in temp_texts), default=0)
+    util_width = max((len(text) for text in util_texts), default=0)
 
     suffixes = []
     for index, gpu in enumerate(gpus):
         suffix = ""
+        if util_width:
+            suffix += util_texts[index].rjust(util_width)
+            if mem_width or has_vram_pct or temp_width:
+                suffix += " "
         if mem_width:
             suffix += mem_texts[index].rjust(mem_width)
         if has_vram_pct:
@@ -488,6 +505,17 @@ class CompactMetric:
     segments: Tuple[Tuple[float, str], ...] = ()
 
 
+def _total_text(total: Optional[int]) -> str:
+    """Short total-size text for labels, e.g. '62.6G' or '504G'."""
+    if not total:
+        return ""
+    if total >= 100 * GIB:
+        return f"{total / GIB:.0f}G"
+    if total >= GIB:
+        return f"{total / GIB:.1f}".rstrip("0").rstrip(".") + "G"
+    return f"{total / MIB:.0f}M"
+
+
 def _cpu_segments(cpu: CpuSample) -> Tuple[Tuple[float, str], ...]:
     parts = (
         (cpu.user, "cpu_user"),
@@ -520,27 +548,26 @@ def compact_metrics(
     ascii_mode: bool = False,
 ) -> List[CompactMetric]:
     """One row of data per metric, for terminals with very few rows."""
-    mem_detail = compact_bytes(mem.used_total, mem.total)
-    mem_suffix = (
-        f"{mem_detail}({mem.used_pct:.1f}%)"
-        if mem_detail
-        else f"{mem.used_pct:.1f}%"
-    )
-    cpu_detail = f"{len(cpu.cores)}({cpu.total:.1f}%)"
+    mem_suffix = f"{mem.used_pct:.1f}%"
+    cpu_detail = f"{cpu.total:.1f}%"
     if cpu.freq is not None:
         cpu_detail += " " + _freq_text(cpu.freq)
     if cpu.temp is not None:
         cpu_detail += " " + _temp_text(cpu.temp, ascii_mode)
+    cpu_label = f"CPU({cpu.core_count})" if cpu.core_count else "CPU"
+    mem_label = f"MEM({_total_text(mem.total)})" if mem.total else "MEM"
     rows = [
-        CompactMetric("CPU", cpu.total, cpu_detail, _cpu_segments(cpu)),
-        CompactMetric("MEM", mem.used_pct, mem_suffix, _mem_segments(mem)),
+        CompactMetric(cpu_label, cpu.total, cpu_detail, _cpu_segments(cpu)),
+        CompactMetric(mem_label, mem.used_pct, mem_suffix, _mem_segments(mem)),
     ]
     if gpus:
         # Every GPU, including a single card, gets one row that combines
-        # utilisation, VRAM and temperature: "12.3/24G(51%) 54°C".
+        # utilisation, VRAM and temperature: "93% 12.3/24G(51%) 54°C".
         suffixes = _gpu_suffixes(gpus, ascii_mode, align=len(gpus) > 1)
         for index, gpu in enumerate(gpus):
             label = "GPU" if len(gpus) == 1 else f"GPU{gpu.index}"
+            if gpu.cores is not None:
+                label = f"{label}({gpu.cores})"
             rows.append(CompactMetric(label, gpu.util, suffixes[index]))
     return rows
 

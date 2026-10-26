@@ -10,6 +10,7 @@ If no source is available the GPU panels are simply omitted.
 
 from __future__ import annotations
 
+import ctypes
 import glob
 import math
 import os
@@ -17,7 +18,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass, replace
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 GIB = 1024 ** 3
 
@@ -35,6 +36,8 @@ class GpuSample:
     mem_used: Optional[int] = None
     mem_total: Optional[int] = None
     temp: Optional[float] = None
+    # CUDA core count (NVIDIA only, via NVML); None when unavailable.
+    cores: Optional[int] = None
     stale: bool = False
 
     @property
@@ -102,9 +105,16 @@ class NvidiaBackend:
         self.executable = executable or shutil.which("nvidia-smi")
         self._tasks_at = -1.0
         self._tasks_value: Optional[int] = None
+        self._cores: Optional[Dict[int, int]] = None
 
     def available(self) -> bool:
         return bool(self.executable)
+
+    def _core_counts(self) -> Dict[int, int]:
+        # The core count is a constant: read it once, never refresh.
+        if self._cores is None:
+            self._cores = read_nvidia_gpu_cores()
+        return self._cores
 
     def sample(self) -> List[GpuSample]:
         if not self.executable:
@@ -124,7 +134,11 @@ class NvidiaBackend:
             return []
         if completed.returncode != 0:
             return []
-        return parse_nvidia_csv(completed.stdout)
+        gpus = parse_nvidia_csv(completed.stdout)
+        cores = self._core_counts()
+        if cores:
+            gpus = [replace(gpu, cores=cores.get(gpu.index)) for gpu in gpus]
+        return gpus
 
     def task_count(self) -> Optional[int]:
         """Number of unique compute processes across all GPUs."""
@@ -151,6 +165,60 @@ class NvidiaBackend:
         self._tasks_at = now
         self._tasks_value = parse_nvidia_task_pids(completed.stdout)
         return self._tasks_value
+
+
+_NVML_CORE_LIMIT = 64
+
+
+def _nvml_library() -> Optional[object]:
+    """Load the NVML shared library, or None when unavailable."""
+    for name in ("libnvidia-ml.so.1", "libnvidia-ml.so"):
+        try:
+            return ctypes.CDLL(name)
+        except OSError:
+            continue
+    return None
+
+
+def read_nvidia_gpu_cores(library: Optional[object] = None) -> Dict[int, int]:
+    """Return {GPU index: CUDA core count} via NVML, or {} when unavailable.
+
+    nvidia-smi has no core-count field, but NVML exposes
+    nvmlDeviceGetNumGpuCores. Driving it through ctypes keeps etop free of
+    third-party dependencies; any failure simply means no core count.
+    """
+    lib = library if library is not None else _nvml_library()
+    if lib is None:
+        return {}
+    try:
+        init = getattr(lib, "nvmlInit_v2", None) or getattr(
+            lib, "nvmlInit", None
+        )
+        if init is None or init() != 0:
+            return {}
+        counts: Dict[int, int] = {}
+        try:
+            for index in range(_NVML_CORE_LIMIT):
+                handle = ctypes.c_void_p()
+                if (
+                    lib.nvmlDeviceGetHandleByIndex(index, ctypes.byref(handle))
+                    != 0
+                ):
+                    break
+                cores = ctypes.c_uint(0)
+                if (
+                    lib.nvmlDeviceGetNumGpuCores(handle, ctypes.byref(cores))
+                    == 0
+                    and cores.value
+                ):
+                    counts[index] = cores.value
+        finally:
+            shutdown = getattr(lib, "nvmlShutdown", None)
+            if shutdown is not None:
+                shutdown()
+        return counts
+    except Exception:
+        return {}
 
 
 def _read(path: str) -> Optional[str]:
@@ -282,6 +350,7 @@ class DemoBackend:
                 mem_used=max(0, min(16 * GIB, used)),
                 mem_total=16 * GIB,
                 temp=51.0 + 4.0 * math.sin(self._tick / 9.0),
+                cores=16384,
             )
         ]
 

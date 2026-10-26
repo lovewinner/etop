@@ -286,7 +286,7 @@ def print_once(options: Options) -> None:
     row(
         "CPU",
         sample.total,
-        percent_text=f"{len(sample.cores)}({sample.total:.1f}%)",
+        percent_text=f"{sample.core_count}({sample.total:.1f}%)",
         extra=cpu_extra,
     )
     row(
@@ -296,6 +296,8 @@ def print_once(options: Options) -> None:
     )
     for gpu in gpus:
         details = []
+        if gpu.cores is not None:
+            details.append(f"{gpu.cores} cores")
         if gpu.temp is not None:
             details.append(f"{gpu.temp:.0f}{'C' if ascii_mode else '°C'}")
         if gpu.stale:

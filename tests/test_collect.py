@@ -56,9 +56,7 @@ class CpuCollectorTests(unittest.TestCase):
             collector = CpuCollector(str(path), temp_reader=lambda: None)
             sample = collector.sample()
         self.assertAlmostEqual(sample.total, 30.0)  # 300 busy / 1000 total
-        self.assertEqual(len(sample.cores), 2)
-        self.assertAlmostEqual(sample.cores[0], 30.0)
-        self.assertAlmostEqual(sample.cores[1], 20.0)
+        self.assertEqual(sample.core_count, 2)
         self.assertAlmostEqual(sample.user, 10.0)
         self.assertAlmostEqual(sample.nice, 0.0)
         self.assertAlmostEqual(sample.system, 10.0)
@@ -75,8 +73,7 @@ class CpuCollectorTests(unittest.TestCase):
             path.write_text(STAT_B)
             sample = collector.sample()
         self.assertAlmostEqual(sample.total, 50.0)  # 100 busy / 200 total
-        self.assertAlmostEqual(sample.cores[0], 50.0)
-        self.assertAlmostEqual(sample.cores[1], 50 / 150 * 100)
+        self.assertEqual(sample.core_count, 2)  # snapshot, not refreshed
         self.assertAlmostEqual(sample.user, 50.0)  # +100 user / 200 total
         self.assertAlmostEqual(sample.system, 0.0)
         self.assertAlmostEqual(sample.iowait, 0.0)  # iowait did not move
@@ -88,6 +85,18 @@ class CpuCollectorTests(unittest.TestCase):
             collector = CpuCollector(str(path), temp_reader=lambda: 52.0)
             sample = collector.sample()
         self.assertEqual(sample.temp, 52.0)
+
+    def test_core_count_is_a_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "stat"
+            path.write_text(STAT_A)
+            collector = CpuCollector(str(path))
+            first = collector.sample()
+            # A hotplug event changes the layout, but the label must not.
+            path.write_text(STAT_B)
+            second = collector.sample()
+        self.assertEqual(first.core_count, 2)
+        self.assertEqual(second.core_count, 2)
 
     def test_freq_flows_into_sample(self):
         with tempfile.TemporaryDirectory() as directory:

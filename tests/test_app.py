@@ -22,6 +22,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(code, 0)
         for label in ("CPU", "MEM", "GPU 0", "VRAM 0"):
             self.assertIn(label, output)
+        self.assertIn("16384 cores", output)
 
     def test_once_colours_on_a_tty(self):
         buffer = _TtyStringIO()

@@ -48,7 +48,8 @@ class CpuTimes:
 @dataclass(frozen=True)
 class CpuSample:
     total: float
-    cores: Tuple[float, ...]
+    # Logical CPU count; read once at startup, not refreshed per sample.
+    core_count: int = 0
     # Breakdown of busy time as percentages of the same interval. The
     # values sum exactly to total; idle and iowait are intentionally left
     # out because they are not drawn in the CPU bar.
@@ -298,36 +299,25 @@ class CpuCollector:
         self._temp_reader = temp_reader or read_cpu_temp
         self._freq_reader = freq_reader or read_cpu_freq
         self._previous: Optional[Tuple[CpuTimes, List[CpuTimes]]] = None
+        self._core_count: Optional[int] = None
 
     def sample(self) -> CpuSample:
         overall, cores = read_cpu_times(self._path)
         previous_overall = self._previous[0] if self._previous else None
+        if self._core_count is None:
+            # Snapshot once; the logical CPU count is a constant.
+            self._core_count = len(cores)
         if self._previous is None:
             # First frame: report the average since boot rather than 0%.
             total = 100.0 * overall.busy / overall.total if overall.total else 0.0
-            per_core = tuple(
-                100.0 * times.busy / times.total if times.total else 0.0
-                for times in cores
-            )
         else:
             previous_overall, previous_cores = self._previous
             total = _utilisation(previous_overall, overall)
-            if len(previous_cores) == len(cores):
-                per_core = tuple(
-                    _utilisation(previous, current)
-                    for previous, current in zip(previous_cores, cores)
-                )
-            else:
-                # CPU hotplug changed the layout; fall back to since-boot values.
-                per_core = tuple(
-                    100.0 * times.busy / times.total if times.total else 0.0
-                    for times in cores
-                )
         breakdown = _category_percentages(previous_overall, overall)
         self._previous = (overall, cores)
         return CpuSample(
             total,
-            per_core,
+            self._core_count or 0,
             *breakdown,
             temp=self._temp_reader(),
             freq=self._freq_reader(),
