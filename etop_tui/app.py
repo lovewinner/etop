@@ -25,6 +25,7 @@ from .collect import (
 from .gpu import DemoBackend, GpuMonitor, GpuSample, detect_backends
 from .render import (
     Palette,
+    compact_bytes,
     compact_metrics_for_height,
     draw_compact,
     draw_help,
@@ -33,6 +34,8 @@ from .render import (
     format_uptime,
     load_band,
     pipe_parts,
+    size_text,
+    util_text,
 )
 
 _ANSI_COLORS = {
@@ -263,12 +266,12 @@ def print_once(options: Options) -> None:
             percent = "  n/a"
         else:
             filled, empty = pipe_parts(pct, width)
-            percent = percent_text or f"{pct:5.1f}%"
+            percent = percent_text or util_text(pct)
             if use_ansi:
                 colour = _ANSI_COLORS[load_band(pct)]
                 filled = colour + filled + _ANSI_RESET
                 percent = colour + percent + _ANSI_RESET
-        line = f"{label:<6}{percent}  [{filled}{empty}]"
+        line = f"{label:<6} {percent}  [{filled}{empty}]"
         if extra:
             line += "  " + extra
         print(line.rstrip())
@@ -286,14 +289,15 @@ def print_once(options: Options) -> None:
     row(
         "CPU",
         sample.total,
-        percent_text=f"{sample.core_count}({sample.total:.1f}%)",
+        percent_text=f"{sample.core_count}({util_text(sample.total)})",
         extra=cpu_extra,
     )
-    row(
-        "MEM",
-        mem.used_pct,
-        f"{format_bytes(mem.used_total)} / {format_bytes(mem.total)}",
-    )
+    mem_extra = f"{format_bytes(mem.used_total)} / {format_bytes(mem.total)}"
+    if mem.cache_total:
+        mem_extra += f"  bc:{size_text(mem.cache_total)}"
+    if mem.swap_total:
+        mem_extra += f"  swp:{compact_bytes(mem.swap_used, mem.swap_total)}"
+    row("MEM", mem.used_pct, mem_extra)
     for gpu in gpus:
         details = []
         if gpu.cores is not None:

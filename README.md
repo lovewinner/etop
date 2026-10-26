@@ -33,13 +33,13 @@ etop
 ```text
  dev24G 10.14.25.86 up 11d 16h                     11:33:59
  load 0.14 0.37 0.36  cpu 2/2028  gpu 4
- CPU(20)    [|||||                 ]      13.4% 3.2GHz 52°C
- MEM(15.6G) [||||||||||||||||||||||]                  62.2%
+ CPU(20)    [|||||                 ]        13% 3.2GHz 52°C
+ MEM(15.6G) [||||||||||||||||||||||] 62% bc:5.2G swp:3.2/8G
  GPU(16384) [|||||||||||||||||     ] 79% 14.9/16G(93%) 54°C
  etop 0.1.0  q quit  p pause  +/-  h help
 ```
 
-示例只展示字符，实际颜色见下方的分段说明。主机名使用高亮蓝色加粗显示，便于在多台机器间快速确认当前主机；紧随其后的是默认路由所在网卡的 IPv4 地址（没有默认路由或取不到地址时省略）。版本信息位于底部左下角 footer；第二行还显示 CPU 任务数（running/total 线程）和 GPU 任务数（检测到 GPU 时）。所有指标（CPU、内存、GPU 利用率与显存）都使用 htop 风格、以 `[` `]` 包裹的彩色 `|` 条。逻辑核数、内存总量、GPU 核心数这类常量直接放在标签里（如 `CPU(20)`、`MEM(15.6G)`、`GPU(16384)`），启动时读取一次，不随刷新变化；CPU 核心数取自首次采样的 `/proc/stat`，GPU 核心数通过 NVML 读取并缓存。行尾只显示动态值：CPU 是利用率、频率（如 `3.2GHz`，取当前最高的核频）和温度（如 `52°C`），虚拟机等无传感器/无频率信息的环境会自动省略对应项；内存只显示使用率。单张 GPU 也只占一行：条后依次是利用率、显存占用/总量(百分比)、温度（如 `79% 14.9/16G(93%) 54°C`，前者无括号是 GPU 利用率，括号内是显存占用率），不再单独占用 VRAM 行。
+示例只展示字符，实际颜色见下方的分段说明。主机名使用高亮蓝色加粗显示，便于在多台机器间快速确认当前主机；紧随其后的是默认路由所在网卡的 IPv4 地址（没有默认路由或取不到地址时省略）。版本信息位于底部左下角 footer；第二行还显示 CPU 任务数（running/total 线程）和 GPU 任务数（检测到 GPU 时）。所有指标（CPU、内存、GPU 利用率与显存）都使用 htop 风格、以 `[` `]` 包裹的彩色 `|` 条。逻辑核数、内存总量、GPU 核心数这类常量直接放在标签里（如 `CPU(20)`、`MEM(15.6G)`、`GPU(16384)`），启动时读取一次，不随刷新变化；CPU 核心数取自首次采样的 `/proc/stat`，GPU 核心数通过 NVML 读取并缓存。行尾的动态值左对齐、紧挨在利用率条之后：利用率固定为 3 个字符（最大 `99%`，不足 3 位用空格占位，如 ` 5%`），后面的文字因此能在各行间对齐。CPU 是利用率、频率（如 `3.2GHz`，取当前最高的核频）和温度（如 `52°C`），虚拟机等无传感器/无频率信息的环境会自动省略对应项；内存是使用率、buff/cache 与 swap（如 `62% bc:5.2G swp:3.2/8G`，无 swap 时省略 swap 部分）。单张 GPU 也只占一行：条后依次是利用率、显存占用/总量(百分比)、温度（如 `79% 14.9/16G(93%) 54°C`，前者无括号是 GPU 利用率，括号内是显存占用率），不再单独占用 VRAM 行。
 
 进度条使用两套配色：
 
@@ -86,7 +86,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
   busy 包含 `iowait`（与 htop 详细模式一致），user/nice/system/irq/steal/iowait 的增量分别用于进度条分段，各段之和即显示的整体利用率。
 - **CPU 温度**：优先读取 `/sys/class/hwmon/hwmon*` 中 coretemp/k10temp 等 CPU 传感器的 `temp*_input`，取最高值；没有 hwmon 时回退到 `/sys/class/thermal/thermal_zone*` 中类型含 cpu/pkg/package 的区域。无传感器时省略。
 - **CPU 频率**：优先读取 `/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`（实时频率，取最高核频）；没有 cpufreq 时回退到 `/proc/cpuinfo` 的 `cpu MHz`（标称频率，虚拟机通常只有这个）。两者都不可用时省略。
-- **内存**：`/proc/meminfo`。按 htop 的口径拆分 `MemFree`、`Buffers`、`Cached`、`SReclaimable` 和 `Shmem`：used = `MemTotal - MemFree - Cached - SReclaimable - Buffers`，shared = `Shmem`，cache = `Cached + SReclaimable - Shmem`；文字显示 `(used + shared)/MemTotal`，四个分段之和等于 `MemTotal - MemFree`。
+- **内存**：`/proc/meminfo`。按 htop 的口径拆分 `MemFree`、`Buffers`、`Cached`、`SReclaimable` 和 `Shmem`：used = `MemTotal - MemFree - Cached - SReclaimable - Buffers`，shared = `Shmem`，cache = `Cached + SReclaimable - Shmem`；文字显示使用率（整数）、buff/cache 合计（`bc:`，即 Buffers + 可回收 cache）和 swap 用量（`swp:`，配置了 swap 才显示）。
 - **GPU**：
   - NVIDIA：`nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu`（名称仅用于识别，界面不显示型号）；
   - AMD / 其他 DRM 驱动：`/sys/class/drm/card*/device/gpu_busy_percent`、`mem_info_vram_used`、`mem_info_vram_total`、`hwmon/*/temp1_input`。
@@ -116,20 +116,20 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 ```text
  host 10.0.0.5 up 11d 16h          11:34:16
  load 0.14 0.37 0.36  cpu 2/2028  gpu 1
- CPU(64)    [|||||||  ]   55.7% 2.4GHz 61°C
- MEM(504G)  [|||||||  ]               15.3%
- GPU(16384) [|        ] 5% 1.2/24G(5%) 34°C
+ CPU(64)    [||||] 56% 2.4GHz 61°C
+ MEM(504G)  [||||] 15% bc:127G swp:12.0/64G
+ GPU(16384) [|   ]  5% 1.2/24G( 5%) 34°C
 ```
 
 多 GPU 时会把每张卡写成：
 
 ```text
- CPU(64)     [||||||||||||||       ]      55.7% 2.4GHz 61°C
- MEM(504G)   [||||||||||||         ]                  15.3%
- GPU0(16384) [|||||||||||||||||    ] 81% 38.7/48G(81%) 34°C
- GPU1(9728)  [|||||||||||||||||    ] 81% 38.7/48G(81%) 34°C
- GPU2(16384) [|||||||||            ] 42% 20.2/48G(42%) 33°C
- GPU3(2560)  [|                    ]  5%  2.4/48G(5%)  59°C
+ CPU(64)     [||||||||||||       ] 56% 2.4GHz 61°C
+ MEM(504G)   [||||||||||         ] 15% bc:127G swp:12.0/64G
+ GPU0(16384) [|||||||||||||||    ] 81% 38.7/48G(81%) 34°C
+ GPU1(9728)  [||||||||||||       ] 81% 38.7/48G(81%) 34°C
+ GPU2(16384) [||||||||           ] 42% 20.2/48G(42%) 33°C
+ GPU3(2560)  [|                  ]  5%  2.4/48G( 5%) 59°C
 ```
 
 多张 GPU 而高度不足时（例如 44x5）会退回仅 CPU 和内存两行：
@@ -137,8 +137,8 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 ```text
  host 10.0.0.5 up 11d 16h          11:34:16
  load 0.14 0.37 0.36  cpu 2/2028  gpu 4
- CPU(64)   [|||||||||   ] 55.7% 2.4GHz 61°C
- MEM(504G) [|||||||     ]             15.3%
+ CPU(64)   [|||||] 56% 2.4GHz 61°C
+ MEM(504G) [|||||] 15% bc:127G swp:12.0/64G
  etop 0.1.0  q quit  p pause  +/-  h help
 ```
 

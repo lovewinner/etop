@@ -8,14 +8,16 @@ from etop_tui.render import (
     Rect,
     _freq_text,
     compact_bytes,
-    draw_bar,
     compact_layout,
     compact_metrics,
     compact_metrics_for_height,
+    draw_bar,
     format_bytes,
     format_uptime,
     load_band,
     pipe_parts,
+    size_text,
+    util_text,
 )
 
 
@@ -204,36 +206,36 @@ class CompactLayoutTests(unittest.TestCase):
             ["CPU(2)", "MEM(16G)", "GPU"],
         )
         self.assertAlmostEqual(metrics[0].pct, 42.0)
-        self.assertEqual(metrics[0].detail, "42.0%")
-        self.assertEqual(metrics[1].detail, "50.0%")
+        self.assertEqual(metrics[0].detail, "42%")
+        self.assertEqual(metrics[1].detail, "50% bc:4G")
         self.assertAlmostEqual(metrics[2].pct, 21.0)
-        self.assertEqual(metrics[2].detail, "21% 2.0/24G(8%) 54°C")
+        self.assertEqual(metrics[2].detail, "21% 2.0/24G( 8%) 54°C")
 
     def test_cpu_detail_includes_temperature(self):
         cpu = CpuSample(42.0, 2, temp=52.0)
         mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
         metrics = compact_metrics(cpu, mem, [])
         self.assertEqual(metrics[0].label, "CPU(2)")
-        self.assertEqual(metrics[0].detail, "42.0% 52°C")
+        self.assertEqual(metrics[0].detail, "42% 52°C")
 
     def test_cpu_detail_without_temperature(self):
         cpu = CpuSample(42.0, 2)
         mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
         metrics = compact_metrics(cpu, mem, [])
         self.assertEqual(metrics[0].label, "CPU(2)")
-        self.assertEqual(metrics[0].detail, "42.0%")
+        self.assertEqual(metrics[0].detail, "42%")
 
     def test_cpu_detail_includes_frequency(self):
         cpu = CpuSample(42.0, 2, temp=52.0, freq=3200.0)
         mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
         metrics = compact_metrics(cpu, mem, [])
-        self.assertEqual(metrics[0].detail, "42.0% 3.2GHz 52°C")
+        self.assertEqual(metrics[0].detail, "42% 3.2GHz 52°C")
 
     def test_cpu_detail_frequency_without_temperature(self):
         cpu = CpuSample(42.0, 2, freq=3200.0)
         mem = MemSample(8 * GIB, 1, 0, 0, 0, 0)
         metrics = compact_metrics(cpu, mem, [])
-        self.assertEqual(metrics[0].detail, "42.0% 3.2GHz")
+        self.assertEqual(metrics[0].detail, "42% 3.2GHz")
 
     def test_freq_text_formatting(self):
         self.assertEqual(_freq_text(3200.0), "3.2GHz")
@@ -286,7 +288,44 @@ class CompactLayoutTests(unittest.TestCase):
         )
         self.assertAlmostEqual(metrics[1].pct, 60.0)
         self.assertEqual(metrics[1].label, "MEM(100G)")
-        self.assertEqual(metrics[1].detail, "60.0%")
+        self.assertEqual(metrics[1].detail, "60% bc:30G")
+
+    def test_mem_detail_with_buff_cache_and_swap(self):
+        cpu = CpuSample(10.0, 4)
+        mem = MemSample(
+            total=16 * GIB,
+            free=4 * GIB,
+            buffers=1 * GIB,
+            cached=10 * GIB,
+            swap_total=8 * GIB,
+            swap_free=7 * GIB,
+            sreclaimable=1 * GIB,
+            shmem=0,
+        )
+        metrics = compact_metrics(cpu, mem, [])
+        self.assertEqual(metrics[1].label, "MEM(16G)")
+        # used = 16 - 4 - 10 - 1 - 1 = 0 -> ' 0%'; bc = 11 + 1 = 12G
+        self.assertEqual(metrics[1].detail, " 0% bc:12G swp:1.0/8G")
+
+    def test_mem_detail_without_cache_or_swap(self):
+        cpu = CpuSample(10.0, 4)
+        mem = MemSample(16 * GIB, 4 * GIB, 0, 0, 0, 0)
+        metrics = compact_metrics(cpu, mem, [])
+        self.assertEqual(metrics[1].detail, "75%")
+
+    def test_util_text_is_padded_and_capped(self):
+        self.assertEqual(util_text(0.4), " 0%")
+        self.assertEqual(util_text(5.0), " 5%")
+        self.assertEqual(util_text(13.4), "13%")
+        self.assertEqual(util_text(99.4), "99%")
+        self.assertEqual(util_text(100.0), "99%")
+
+    def test_size_text_formatting(self):
+        self.assertEqual(size_text(int(62.6 * GIB)), "62.6G")
+        self.assertEqual(size_text(504 * GIB), "504G")
+        self.assertEqual(size_text(16 * GIB), "16G")
+        self.assertEqual(size_text(640 * 1024 ** 2), "640M")
+        self.assertEqual(size_text(0), "")
 
     def test_gpu_label_includes_core_count(self):
         cpu = CpuSample(10.0, 4)
@@ -297,7 +336,7 @@ class CompactLayoutTests(unittest.TestCase):
         )
         metrics = compact_metrics(cpu, mem, [gpu])
         self.assertEqual(metrics[2].label, "GPU(16384)")
-        self.assertEqual(metrics[2].detail, "93% 2.0/24G(8%) 54°C")
+        self.assertEqual(metrics[2].detail, "93% 2.0/24G( 8%) 54°C")
 
     def test_gpu_label_without_cores(self):
         cpu = CpuSample(10.0, 4)
@@ -305,7 +344,7 @@ class CompactLayoutTests(unittest.TestCase):
         gpu = GpuSample("nvidia", 0, "RTX", 93.0, 2 * GIB, 24 * GIB, 54.0)
         metrics = compact_metrics(cpu, mem, [gpu])
         self.assertEqual(metrics[2].label, "GPU")
-        self.assertEqual(metrics[2].detail, "93% 2.0/24G(8%) 54°C")
+        self.assertEqual(metrics[2].detail, "93% 2.0/24G( 8%) 54°C")
 
     def test_multi_gpu_labels_and_alignment(self):
         cpu = CpuSample(10.0, 4)
@@ -327,7 +366,7 @@ class CompactLayoutTests(unittest.TestCase):
         )
         self.assertEqual(
             [metric.detail for metric in metrics[2:]],
-            ["42%  2.0/24G(8%)  54°C", "87% 19.0/24G(79%) 61°C"],
+            ["42%  2.0/24G( 8%) 54°C", "87% 19.0/24G(79%) 61°C"],
         )
         self.assertEqual(
             len(metrics[2].detail), len(metrics[3].detail)
@@ -345,7 +384,7 @@ class CompactLayoutTests(unittest.TestCase):
             [metric.label for metric in metrics],
             ["CPU(4)", "MEM(8G)", "GPU0", "GPU1"],
         )
-        self.assertIn("2.0/24G(8%)", metrics[2].detail)
+        self.assertIn("2.0/24G( 8%)", metrics[2].detail)
         self.assertIn("54°C", metrics[2].detail)
         self.assertNotIn("RTX 4090", metrics[2].detail)
         self.assertNotIn("42.0%", metrics[2].detail)

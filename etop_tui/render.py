@@ -374,7 +374,7 @@ def _gpu_util_text(gpu: GpuSample) -> str:
     """'93%' when the utilisation is known, else ''."""
     if gpu.util is None:
         return ""
-    return f"{gpu.util:.0f}%"
+    return util_text(gpu.util)
 
 
 def _gpu_suffixes(
@@ -390,7 +390,8 @@ def _gpu_suffixes(
     mem_texts = [compact_bytes(gpu.mem_used, gpu.mem_total) for gpu in gpus]
     temp_texts = [_temp_text(gpu.temp, ascii_mode) for gpu in gpus]
     pct_texts = [
-        "" if gpu.mem_pct is None else f"({gpu.mem_pct:.0f}%)" for gpu in gpus
+        "" if gpu.mem_pct is None else f"({util_text(gpu.mem_pct)})"
+        for gpu in gpus
     ]
     util_texts = [_gpu_util_text(gpu) for gpu in gpus]
     has_vram_pct = any(pct_texts)
@@ -505,8 +506,17 @@ class CompactMetric:
     segments: Tuple[Tuple[float, str], ...] = ()
 
 
-def _total_text(total: Optional[int]) -> str:
-    """Short total-size text for labels, e.g. '62.6G' or '504G'."""
+def util_text(pct: float) -> str:
+    """Utilisation as a fixed 3-character field, capped at 99%.
+
+    Keeping the field at three characters (99%, 13%, ' 5%') lets the text
+    that follows the utilisation line up across rows.
+    """
+    return f"{min(pct, 99.0):2.0f}%"
+
+
+def size_text(total: Optional[int]) -> str:
+    """Short byte-size text, e.g. '62.6G', '504G' or '640M'."""
     if not total:
         return ""
     if total >= 100 * GIB:
@@ -548,14 +558,18 @@ def compact_metrics(
     ascii_mode: bool = False,
 ) -> List[CompactMetric]:
     """One row of data per metric, for terminals with very few rows."""
-    mem_suffix = f"{mem.used_pct:.1f}%"
-    cpu_detail = f"{cpu.total:.1f}%"
+    mem_suffix = util_text(mem.used_pct)
+    if mem.cache_total:
+        mem_suffix += f" bc:{size_text(mem.cache_total)}"
+    if mem.swap_total:
+        mem_suffix += f" swp:{compact_bytes(mem.swap_used, mem.swap_total)}"
+    cpu_detail = util_text(cpu.total)
     if cpu.freq is not None:
         cpu_detail += " " + _freq_text(cpu.freq)
     if cpu.temp is not None:
         cpu_detail += " " + _temp_text(cpu.temp, ascii_mode)
     cpu_label = f"CPU({cpu.core_count})" if cpu.core_count else "CPU"
-    mem_label = f"MEM({_total_text(mem.total)})" if mem.total else "MEM"
+    mem_label = f"MEM({size_text(mem.total)})" if mem.total else "MEM"
     rows = [
         CompactMetric(cpu_label, cpu.total, cpu_detail, _cpu_segments(cpu)),
         CompactMetric(mem_label, mem.used_pct, mem_suffix, _mem_segments(mem)),
@@ -667,13 +681,9 @@ def draw_compact(
             metric.segments,
         )
         if metric.detail:
-            put(
-                win,
-                y,
-                right_edge - len(metric.detail),
-                metric.detail,
-                pal.attr("dim"),
-            )
+            # Left-aligned right after the bar, so the utilisation sits
+            # next to it instead of at the far right edge.
+            put(win, y, bar_end + 1, metric.detail, pal.attr("dim"))
 
     if footer is not None:
         draw_footer(win, footer, interval, paused, pal)
