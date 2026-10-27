@@ -360,14 +360,15 @@ def _temp_text(temp: Optional[float], ascii_mode: bool) -> str:
     return f"{temp:.0f}{unit}"
 
 
-def _freq_text(freq: Optional[float]) -> str:
-    """Format a frequency in MHz as '3.2GHz' or '800MHz'."""
+def freq_text(freq: Optional[float]) -> str:
+    """Format a frequency in MHz as GHz with one decimal: '3.2GHz'.
+
+    A single unit for every core keeps the column width predictable, so
+    even a down-clocked 800 MHz core reads '0.8GHz'.
+    """
     if freq is None:
         return ""
-    if freq >= 1000:
-        ghz = f"{freq / 1000:.1f}".rstrip("0").rstrip(".")
-        return f"{ghz}GHz"
-    return f"{freq:.0f}MHz"
+    return f"{freq / 1000:.1f}GHz"
 
 
 def _gpu_util_text(gpu: GpuSample) -> str:
@@ -565,7 +566,7 @@ def compact_metrics(
         mem_suffix += f" swp:{compact_bytes(mem.swap_used, mem.swap_total)}"
     cpu_detail = util_text(cpu.total)
     if cpu.freq is not None:
-        cpu_detail += " " + _freq_text(cpu.freq)
+        cpu_detail += " " + freq_text(cpu.freq)
     if cpu.temp is not None:
         cpu_detail += " " + _temp_text(cpu.temp, ascii_mode)
     cpu_label = f"CPU({cpu.core_count})" if cpu.core_count else "CPU"

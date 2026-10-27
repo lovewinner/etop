@@ -6,7 +6,6 @@ from etop_tui.render import (
     GIB,
     Palette,
     Rect,
-    _freq_text,
     compact_bytes,
     compact_layout,
     compact_metrics,
@@ -14,6 +13,7 @@ from etop_tui.render import (
     draw_bar,
     format_bytes,
     format_uptime,
+    freq_text,
     load_band,
     pipe_parts,
     size_text,
@@ -237,12 +237,13 @@ class CompactLayoutTests(unittest.TestCase):
         metrics = compact_metrics(cpu, mem, [])
         self.assertEqual(metrics[0].detail, "42% 3.2GHz")
 
-    def test_freq_text_formatting(self):
-        self.assertEqual(_freq_text(3200.0), "3.2GHz")
-        self.assertEqual(_freq_text(4000.0), "4GHz")
-        self.assertEqual(_freq_text(4500.0), "4.5GHz")
-        self.assertEqual(_freq_text(800.0), "800MHz")
-        self.assertEqual(_freq_text(None), "")
+    def test_freq_text_always_uses_ghz(self):
+        self.assertEqual(freq_text(3200.0), "3.2GHz")
+        self.assertEqual(freq_text(4000.0), "4.0GHz")
+        self.assertEqual(freq_text(4500.0), "4.5GHz")
+        self.assertEqual(freq_text(800.0), "0.8GHz")
+        self.assertEqual(freq_text(5555.0), "5.6GHz")
+        self.assertEqual(freq_text(None), "")
 
     def test_cpu_and_memory_segments(self):
         cpu = CpuSample(

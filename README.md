@@ -47,7 +47,7 @@ etop
 
 行尾的动态值左对齐、紧挨在利用率条之后。利用率固定为 3 个字符（最大 `99%`，不足 3 位用空格占位，如 ` 5%`），后面的文字因此能在各行间对齐：
 
-- **CPU**：利用率、频率（如 `3.2GHz`，取当前最高的核频）、温度（如 `52°C`）；虚拟机等无传感器/无频率信息的环境自动省略对应项。
+- **CPU**：利用率、频率（如 `3.2GHz`，取当前最高的核频，统一换算为 GHz 并保留 1 位小数，降频到 800MHz 的核显示 `0.8GHz`）、温度（如 `52°C`）；虚拟机等无传感器/无频率信息的环境自动省略对应项。
 - **内存**：使用率、buff/cache 与 swap（如 `62% bc:5.2G swp:3.2/8G`），无 swap 时省略 swap 部分。
 - **GPU**：利用率、显存占用/总量(百分比)、温度（如 `79% 14.9/16G(93%) 54°C`，前者无括号是 GPU 利用率，括号内是显存占用率）；单张 GPU 也只占一行，不再单独显示 VRAM 行。
 
@@ -97,7 +97,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 - **CPU**：`/proc/stat`，两次采样之间 busy/total 的增量；首帧显示开机以来的平均值。
   busy 包含 `iowait`（与 htop 详细模式一致），user/nice/system/irq/steal/iowait 的增量分别用于进度条分段，各段之和即显示的整体利用率。
 - **CPU 温度**：优先读取 `/sys/class/hwmon/hwmon*` 中 coretemp/k10temp 等 CPU 传感器的 `temp*_input`，取最高值；没有 hwmon 时回退到 `/sys/class/thermal/thermal_zone*` 中类型含 cpu/pkg/package 的区域。无传感器时省略。
-- **CPU 频率**：优先读取 `/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`（实时频率，取最高核频）；没有 cpufreq 时回退到 `/proc/cpuinfo` 的 `cpu MHz`（标称频率，虚拟机通常只有这个）。两者都不可用时省略。
+- **CPU 频率**：优先读取 `/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`（实时频率，取最高核频）；没有 cpufreq 时回退到 `/proc/cpuinfo` 的 `cpu MHz`（标称频率，虚拟机通常只有这个）。两者都不可用时省略；无论来源如何，界面一律以 GHz 显示并保留 1 位小数。
 - **内存**：`/proc/meminfo`。按 htop 的口径拆分 `MemFree`、`Buffers`、`Cached`、`SReclaimable` 和 `Shmem`：used = `MemTotal - MemFree - Cached - SReclaimable - Buffers`，shared = `Shmem`，cache = `Cached + SReclaimable - Shmem`；文字显示使用率（整数）、buff/cache 合计（`bc:`，即 Buffers + 可回收 cache）和 swap 用量（`swp:`，配置了 swap 才显示）。
 - **GPU**：
   - NVIDIA：`nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu`（名称仅用于识别，界面不显示型号）；

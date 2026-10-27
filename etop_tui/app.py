@@ -32,6 +32,7 @@ from .render import (
     draw_too_small,
     format_bytes,
     format_uptime,
+    freq_text,
     load_band,
     pipe_parts,
     size_text,
@@ -276,13 +277,7 @@ def print_once(options: Options) -> None:
             line += "  " + extra
         print(line.rstrip())
 
-    cpu_extra = ""
-    if sample.freq is not None:
-        if sample.freq >= 1000:
-            ghz = f"{sample.freq / 1000:.1f}".rstrip("0").rstrip(".")
-            cpu_extra = f"{ghz}GHz"
-        else:
-            cpu_extra = f"{sample.freq:.0f}MHz"
+    cpu_extra = freq_text(sample.freq)
     if sample.temp is not None:
         temp_text = f"{sample.temp:.0f}{'C' if ascii_mode else '°C'}"
         cpu_extra = f"{cpu_extra} {temp_text}".strip()
