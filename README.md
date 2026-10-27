@@ -36,7 +36,7 @@ etop
  CPU(20)    [|||||                 ] 13% 3.2GHz 52°C
  MEM(15.6G) [||||||||||||||||||||||] 62% bc:5.2G swp:3.2/8G
  GPU(16384) [|||||||||||||||||     ] 79% 14.9/16G(93%) 54°C
- etop 0.1.0  q quit  p pause  +/-  h help
+ etop v0.2.0  q quit  p pause  +/-  h help
 ```
 
 示例只展示字符，实际颜色见下方的分段说明。
@@ -151,7 +151,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
  load 0.14 0.37 0.36  cpu 2/2028  gpu 4
  CPU(64)   [|||||] 56% 2.4GHz 61°C
  MEM(504G) [|||||] 15% bc:127G swp:12.0/64G
- etop 0.1.0  q quit  p pause  +/-  h help
+ etop v0.2.0  q quit  p pause  +/-  h help
 ```
 
 空间富余时在底部留白。极紧尺寸下 footer（含版本和快捷键）会自动省略，以保留全部指标行；高度不足时 GPU 行会被暂时隐藏（只保留 CPU 和内存）。低于 **44x5** 时显示形如 `too small (min 44x5)` 的提示。

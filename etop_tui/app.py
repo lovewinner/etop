@@ -243,7 +243,7 @@ def print_once(options: Options) -> None:
     if ip:
         identity += f"  {ip}"
     print(
-        f"etop {__version__}  {identity}  up {format_uptime(uptime)}"
+        f"etop v{__version__}  {identity}  up {format_uptime(uptime)}"
         f"  load {loads[0]:.2f} {loads[1]:.2f} {loads[2]:.2f}"
     )
     print()
@@ -348,7 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--ascii", action="store_true", help="use ASCII instead of Unicode"
     )
     parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {__version__}"
+        "--version", action="version", version=f"%(prog)s v{__version__}"
     )
     return parser
 

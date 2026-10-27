@@ -486,7 +486,7 @@ def draw_header(
 def draw_footer(
     win, rect: Rect, interval: float, paused: bool, pal: Palette
 ) -> None:
-    version = f" etop {__version__}"
+    version = f" etop v{__version__}"
     if rect.w < 62:
         text = f"{version}  q quit  p pause  +/-  h help"
     else:
