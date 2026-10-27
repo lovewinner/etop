@@ -1,6 +1,9 @@
 # etop
 <img width="1148" height="192" alt="etop running on dev24G" src="docs/screenshot.png" />
 
+[![release](https://img.shields.io/github/v/release/lovewinner/etop?label=release)](https://github.com/lovewinner/etop/releases)
+[![license](https://img.shields.io/github/license/lovewinner/etop)](LICENSE)
+
 一个类似 htop 的极简终端监控工具，只关注四项实时利用率：
 
 | 指标 | 说明 |
@@ -24,9 +27,12 @@ python3 -m etop_tui
 # 安装为命令
 pip install -e .
 etop
+
+# 安装某个发布版本
+pip install "git+https://github.com/lovewinner/etop.git@v0.2.0"
 ```
 
-要求 Linux + Python 3.9+。若终端不支持 UTF-8，可加 `--ascii`。
+要求 Linux + Python 3.9+。若终端不支持 UTF-8，可加 `--ascii`；当前版本为 **v0.2.0**，变化见[更新日志](#更新日志)。
 
 ## 界面
 
@@ -90,7 +96,7 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 - `--gpu`：GPU 后端，可选 `auto`、`nvidia`、`sysfs`、`none`，默认自动探测。
 - `--demo`：使用合成 GPU 数据，便于在没有 GPU 的机器上预览 GPU 行。
 - `--no-color` / `--ascii`：关闭颜色（仍使用终端默认背景）/ 使用纯 ASCII 字符（如 `°C` 变为 `C`）。
-- `--version`：打印版本号后退出。
+- `--version`：打印版本号（形如 `etop v0.2.0`）后退出。
 
 ## 数据来源
 
@@ -155,6 +161,20 @@ etop [-d SECONDS] [--once] [--gpu {auto,nvidia,sysfs,none}]
 ```
 
 空间富余时在底部留白。极紧尺寸下 footer（含版本和快捷键）会自动省略，以保留全部指标行；高度不足时 GPU 行会被暂时隐藏（只保留 CPU 和内存）。低于 **44x5** 时显示形如 `too small (min 44x5)` 的提示。
+
+## 更新日志
+
+### v0.2.0
+
+首个打标签的发布版本，相比 0.1.0：
+
+- **指标**：新增 CPU 温度（hwmon / thermal 双来源）与频率（cpufreq / cpuinfo 双来源）；GPU 支持多卡逐行显示，并给出 CUDA 核心数（NVML）
+- **分段配色**：CPU 条按 user/nice/system/irq/steal/iowait 分段；内存条按 used/shared/buffers/cache 分段，口径与 htop 一致
+- **信息**：header 显示默认路由网卡 IP 与 CPU/GPU 任务数，内存行显示 `bc:` 与 `swp:`
+- **排版**：进度条改为 `[|...]`，常量入标签（`CPU(32)`、`MEM(62.6G)`、`GPU(16384)`），利用率 3 字符定宽，频率统一 GHz 保留 1 位小数，最小尺寸 44x5
+- **工具**：新增 `tools/screenshot.sh` 与 `tools/render_ansi.py`，README 截图可一键重新生成
+
+完整说明见 [v0.2.0 发布页](https://github.com/lovewinner/etop/releases/tag/v0.2.0)。
 
 ## 测试
 
