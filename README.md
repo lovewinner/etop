@@ -163,3 +163,24 @@ python3 -m unittest discover -s tests -v
 ```
 
 测试覆盖 `/proc` 解析、CPU 时间分类、温度与频率读取、内存分类核算、默认路由与 IP 解析、NVIDIA CSV 解析、NVML 核心数读取、sysfs GPU 采样、分段进度条绘制、布局与格式化。
+
+## 截图
+
+顶部截图由 `tools/screenshot.sh` 自动生成：它把 `etop_tui` 复制到目标机（或本机运行），在指定尺寸的 tmux 会话里启动 etop，用 `tmux capture-pane -e` 抓取带 SGR 颜色的一屏，再由 `tools/render_ansi.py` 按 xterm-256 调色板渲染成 PNG。
+
+```bash
+tools/screenshot.sh                     # 本机，116x6
+tools/screenshot.sh -H dev24G           # 远程主机（有 GPU 和温度传感器）
+tools/screenshot.sh -H dev24G -x 100 -y 8 -o /tmp/shot.png
+```
+
+| 选项 | 说明 |
+| --- | --- |
+| `-H host` | 通过 ssh 在远程主机上运行，默认在本机运行 |
+| `-x/-y` | 终端列数/行数，默认 116x6 |
+| `-o path` | 输出 PNG，默认 `docs/screenshot.png` |
+| `-t title` | 窗口标题文字，默认取主机名 |
+| `-d secs` | 截图前等待时间，默认 4 秒 |
+| `-k` | 保留原始 ANSI 抓取文件，便于排查 |
+
+依赖 `tmux`、`python3` 和 Pillow（`pip install pillow`）；远程模式还需要免密登录的 ssh。脚本退出时会自动关闭 tmux 会话并清理远端临时目录。
